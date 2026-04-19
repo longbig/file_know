@@ -1,5 +1,6 @@
 """学术评论句提取工具 - FastAPI Web 服务 (Vercel Serverless 适配版)"""
 
+import base64
 import logging
 import os
 import sys
@@ -8,7 +9,7 @@ import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from starlette.responses import JSONResponse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,6 +32,14 @@ OUTPUT_DIR = os.path.join(tempfile.gettempdir(), "file_know_output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
+def _file_to_base64(file_path: str) -> str:
+    """将文件读取为 base64 编码字符串"""
+    if file_path and os.path.exists(file_path):
+        with open(file_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    return ""
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """主页"""
@@ -47,8 +56,7 @@ async def analyze(
     base_url: str = Form("https://timesniper.club"),
     provider: str = Form(""),
 ):
-    """同步分析 - 处理完毕后直接返回结果"""
-    # 使用环境变量中的 API Key 作为后备
+    """同步分析 - 处理完毕后直接返回结果（含文件 base64 数据）"""
     effective_api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
     if not effective_api_key:
         return JSONResponse(
@@ -80,9 +88,8 @@ async def analyze(
             provider=provider,
         )
 
-        # 构建响应数据
         records_data = []
-        zip_path = ""
+        files = {}
 
         if result["records"]:
             pdf_name = Path(pdf_path).stem
@@ -99,6 +106,29 @@ async def analyze(
                     if path and os.path.exists(path):
                         zf.write(path, os.path.basename(path))
 
+            # 将所有文件编码为 base64，直接在响应中返回
+            files["zip"] = {
+                "name": "全部结果.zip",
+                "data": _file_to_base64(zip_path),
+            }
+            highlighted_pdf = result.get("highlighted_pdf_path", "")
+            if highlighted_pdf:
+                files["highlighted_pdf"] = {
+                    "name": os.path.basename(highlighted_pdf),
+                    "data": _file_to_base64(highlighted_pdf),
+                }
+            excel_path = result.get("excel_path", "")
+            if excel_path:
+                files["excel"] = {
+                    "name": os.path.basename(excel_path),
+                    "data": _file_to_base64(excel_path),
+                }
+            for i, wp in enumerate(result.get("word_paths", [])):
+                files[f"word_{i}"] = {
+                    "name": os.path.basename(wp),
+                    "data": _file_to_base64(wp),
+                }
+
             for r in result["records"]:
                 records_data.append({
                     "sentence": r.评论句原文,
@@ -111,36 +141,13 @@ async def analyze(
         return {
             "count": len(result["records"]),
             "records": records_data,
-            "highlighted_pdf": result.get("highlighted_pdf_path", ""),
-            "excel_path": result.get("excel_path", ""),
-            "word_paths": result.get("word_paths", []),
-            "zip_path": zip_path,
+            "files": files,
             "log": "\n".join(result.get("log", [])),
         }
 
     except Exception as e:
         logger.exception("分析任务失败")
         return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-@app.get("/download/{path:path}")
-async def download(path: str):
-    """文件下载"""
-    # URL 路径中前导 / 被去掉，需要补回
-    if not path.startswith("/"):
-        path = "/" + path
-    abs_path = os.path.abspath(path)
-    if not abs_path.startswith(os.path.abspath(OUTPUT_DIR)):
-        return JSONResponse(status_code=403, content={"error": "禁止访问"})
-
-    if not os.path.exists(abs_path):
-        return JSONResponse(status_code=404, content={"error": "文件不存在"})
-
-    return FileResponse(
-        abs_path,
-        filename=os.path.basename(abs_path),
-        media_type="application/octet-stream",
-    )
 
 
 if __name__ == "__main__":
