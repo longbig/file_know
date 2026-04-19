@@ -169,6 +169,17 @@
 
             try {
                 const resp = await fetch('/api/analyze', { method: 'POST', body: formData });
+
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    if (resp.status === 504 || text.includes('FUNCTION_INVOCATION_TIMEOUT')) {
+                        alert('处理超时：PDF 文件过大或 LLM 响应较慢，请稍后重试或使用更小的文件。');
+                    } else {
+                        alert('服务器错误 (' + resp.status + '): ' + text.substring(0, 200));
+                    }
+                    return;
+                }
+
                 const result = await resp.json();
 
                 if (result.error) {
