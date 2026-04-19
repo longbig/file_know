@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学术评论句提取工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fa; color: #333; }
+        .container { max-width: 960px; margin: 0 auto; padding: 2rem 1rem; }
+        h1 { text-align: center; font-size: 1.8rem; margin-bottom: 0.3rem; color: #1a1a2e; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 2rem; font-size: 0.95rem; }
+        .card { background: #fff; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #16213e; border-bottom: 2px solid #e8ecf1; padding-bottom: 0.5rem; }
+        .form-row { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+        .form-group { flex: 1; min-width: 200px; }
+        .form-group label { display: block; font-weight: 600; margin-bottom: 0.3rem; font-size: 0.9rem; color: #444; }
+        .form-group input, .form-group select { width: 100%; padding: 0.6rem; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9rem; transition: border-color 0.2s; }
+        .form-group input:focus, .form-group select:focus { border-color: #4361ee; outline: none; }
+        .file-upload { border: 2px dashed #ccc; border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.3s; background: #fafbfc; }
+        .file-upload:hover { border-color: #4361ee; background: #f0f4ff; }
+        .file-upload.has-file { border-color: #2ecc71; background: #f0fff4; }
+        .file-upload input { display: none; }
+        .file-upload .icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+        .file-upload .text { color: #666; font-size: 0.9rem; }
+        .file-upload .filename { color: #2ecc71; font-weight: 600; margin-top: 0.5rem; }
+        .btn { display: inline-block; padding: 0.8rem 2rem; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #4361ee; color: #fff; width: 100%; }
+        .btn-primary:hover { background: #3a56d4; }
+        .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
+        .btn-download { background: #2ecc71; color: #fff; padding: 0.5rem 1rem; font-size: 0.85rem; text-decoration: none; margin: 0.3rem; border-radius: 6px; display: inline-block; }
+        .btn-download:hover { background: #27ae60; }
+        .log-box { background: #1a1a2e; color: #a0e8af; border-radius: 8px; padding: 1rem; font-family: "Fira Code", monospace; font-size: 0.8rem; max-height: 400px; overflow-y: auto; white-space: pre-wrap; min-height: 100px; }
+        .preview { margin-top: 1rem; }
+        .preview-item { background: #f8f9fa; border-left: 3px solid #4361ee; padding: 1rem; margin-bottom: 0.8rem; border-radius: 0 8px 8px 0; }
+        .preview-item strong { color: #16213e; }
+        .preview-item .sentence { color: #e74c3c; font-weight: 500; }
+        .downloads { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+        .hidden { display: none; }
+        .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .accordion { cursor: pointer; padding: 0.6rem; background: #f0f4ff; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.85rem; color: #4361ee; }
+        .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s; }
+        .accordion-content.open { max-height: 200px; }
+        .progress { margin-top: 1rem; }
+        .progress-bar { height: 6px; background: #e8ecf1; border-radius: 3px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #4361ee; border-radius: 3px; transition: width 0.5s; width: 0%; }
+        .progress-text { font-size: 0.8rem; color: #666; margin-top: 0.3rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>学术评论句提取工具</h1>
+        <p class="subtitle">上传学术论文 PDF，自动识别学术评论句，生成 Excel 汇总表、Word 登记表和高亮 PDF</p>
+
+        <div class="card">
+            <h2>上传与设置</h2>
+            <div class="file-upload" id="dropZone" onclick="document.getElementById('pdfFile').click()">
+                <input type="file" id="pdfFile" accept=".pdf">
+                <div class="icon">📄</div>
+                <div class="text">点击或拖拽上传论文 PDF</div>
+                <div class="filename hidden" id="fileName"></div>
+            </div>
+
+            <div class="form-row" style="margin-top: 1rem;">
+                <div class="form-group">
+                    <label>选择模型</label>
+                    <select id="model">
+                        <option value="claude-sonnet-4-6">claude-sonnet-4-6 (默认)</option>
+                        <option value="claude-opus-4-6">claude-opus-4-6 (更高精度)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>提供者信息</label>
+                    <input type="text" id="provider" placeholder="姓名/导师 学校 日期">
+                </div>
+            </div>
+
+            <div class="accordion" onclick="toggleAccordion()">API 设置 (点击展开)</div>
+            <div class="accordion-content" id="apiSettings">
+                <div class="form-row" style="padding: 0.5rem 0;">
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" id="apiKey" value="sk-I8D47FrTRhSOknjY1fJLVvSoGtEemyqY49hIVZBUwjWd8uJ6">
+                    </div>
+                    <div class="form-group">
+                        <label>API Base URL</label>
+                        <input type="text" id="baseUrl" value="https://timesniper.club">
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-primary" id="startBtn" onclick="startAnalysis()">
+                开始分析
+            </button>
+
+            <div class="progress hidden" id="progressArea">
+                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                <div class="progress-text" id="progressText">准备中...</div>
+            </div>
+        </div>
+
+        <div class="card hidden" id="resultCard">
+            <h2>处理结果</h2>
+
+            <div class="downloads" id="downloadArea"></div>
+
+            <div class="preview" id="previewArea"></div>
+
+            <details style="margin-top: 1rem;">
+                <summary style="cursor: pointer; color: #666; font-size: 0.85rem;">查看处理日志</summary>
+                <div class="log-box" id="logBox"></div>
+            </details>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('pdfFile');
+
+        // 拖拽上传
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#4361ee'; });
+        dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#ccc'; });
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#ccc';
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                showFileName(e.dataTransfer.files[0].name);
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length) showFileName(fileInput.files[0].name);
+        });
+
+        function showFileName(name) {
+            const fn = document.getElementById('fileName');
+            fn.textContent = name;
+            fn.classList.remove('hidden');
+            dropZone.classList.add('has-file');
+        }
+
+        function toggleAccordion() {
+            document.getElementById('apiSettings').classList.toggle('open');
+        }
+
+        async function startAnalysis() {
+            const file = fileInput.files[0];
+            if (!file) { alert('请先上传 PDF 文件'); return; }
+
+            const btn = document.getElementById('startBtn');
+            const progressArea = document.getElementById('progressArea');
+            const resultCard = document.getElementById('resultCard');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>分析中...';
+            progressArea.classList.remove('hidden');
+            resultCard.classList.add('hidden');
+
+            const formData = new FormData();
+            formData.append('pdf_file', file);
+            formData.append('model', document.getElementById('model').value);
+            formData.append('api_key', document.getElementById('apiKey').value);
+            formData.append('base_url', document.getElementById('baseUrl').value);
+            formData.append('provider', document.getElementById('provider').value);
+
+            try {
+                // Start analysis
+                const resp = await fetch('/api/analyze', { method: 'POST', body: formData });
+                const taskId = (await resp.json()).task_id;
+
+                // Poll for progress
+                while (true) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    const status = await fetch(`/api/status/${taskId}`).then(r => r.json());
+
+                    document.getElementById('progressFill').style.width = (status.progress * 100) + '%';
+                    document.getElementById('progressText').textContent = status.message;
+
+                    if (status.done) {
+                        showResults(status.result);
+                        break;
+                    }
+                    if (status.error) {
+                        alert('处理失败: ' + status.error);
+                        break;
+                    }
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '开始分析';
+            }
+        }
+
+        function showResults(result) {
+            const resultCard = document.getElementById('resultCard');
+            resultCard.classList.remove('hidden');
+
+            // 下载链接
+            const dl = document.getElementById('downloadArea');
+            dl.innerHTML = '';
+            if (result.zip_path) dl.innerHTML += `<a class="btn-download" href="/download/${result.zip_path}">📦 全部打包下载</a>`;
+            if (result.highlighted_pdf) dl.innerHTML += `<a class="btn-download" href="/download/${result.highlighted_pdf}">📄 高亮 PDF</a>`;
+            if (result.excel_path) dl.innerHTML += `<a class="btn-download" href="/download/${result.excel_path}">📊 Excel 汇总表</a>`;
+            (result.word_paths || []).forEach((p, i) => {
+                dl.innerHTML += `<a class="btn-download" href="/download/${p}">📝 登记表 ${i+1}</a>`;
+            });
+
+            // 预览
+            const preview = document.getElementById('previewArea');
+            preview.innerHTML = '<h3 style="margin-bottom:0.8rem;font-size:1rem;">识别到 ' + result.count + ' 条学术评论句</h3>';
+            (result.records || []).forEach((r, i) => {
+                preview.innerHTML += `
+                    <div class="preview-item">
+                        <div><strong>第 ${i+1} 条</strong></div>
+                        <div class="sentence">${r.sentence}</div>
+                        <div style="margin-top:0.5rem;font-size:0.85rem;color:#666;">
+                            标志词: <strong>${r.marker}</strong> |
+                            被评作者: <strong>${r.author}</strong> |
+                            年份: <strong>${r.year}</strong> |
+                            期刊: ${r.journal}
+                        </div>
+                    </div>`;
+            });
+
+            // 日志
+            document.getElementById('logBox').textContent = result.log || '';
+        }
+    </script>
+</body>
+</html>
