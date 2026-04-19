@@ -126,6 +126,9 @@ async def analyze(
 @app.get("/download/{path:path}")
 async def download(path: str):
     """文件下载"""
+    # URL 路径中前导 / 被去掉，需要补回
+    if not path.startswith("/"):
+        path = "/" + path
     abs_path = os.path.abspath(path)
     if not abs_path.startswith(os.path.abspath(OUTPUT_DIR)):
         return JSONResponse(status_code=403, content={"error": "禁止访问"})
