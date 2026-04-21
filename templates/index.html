@@ -31,11 +31,9 @@
         .btn-download { background: #2ecc71; color: #fff; padding: 0.5rem 1rem; font-size: 0.85rem; text-decoration: none; margin: 0.3rem; border-radius: 6px; display: inline-block; }
         .btn-download:hover { background: #27ae60; }
         .log-box { background: #1a1a2e; color: #a0e8af; border-radius: 8px; padding: 1rem; font-family: "Fira Code", monospace; font-size: 0.8rem; max-height: 400px; overflow-y: auto; white-space: pre-wrap; min-height: 100px; }
-        .preview { margin-top: 1rem; }
         .preview-item { background: #f8f9fa; border-left: 3px solid #4361ee; padding: 1rem; margin-bottom: 0.8rem; border-radius: 0 8px 8px 0; }
         .preview-item strong { color: #16213e; }
         .preview-item .sentence { color: #e74c3c; font-weight: 500; }
-        .downloads { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
         .hidden { display: none; }
         .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -46,6 +44,42 @@
         .progress-bar { height: 6px; background: #e8ecf1; border-radius: 3px; overflow: hidden; }
         .progress-fill { height: 100%; background: #4361ee; border-radius: 3px; transition: width 0.5s; width: 0%; }
         .progress-text { font-size: 0.8rem; color: #666; margin-top: 0.3rem; }
+
+        /* Tab 样式 */
+        .tabs { display: flex; border-bottom: 2px solid #e8ecf1; margin-bottom: 1.5rem; }
+        .tab { padding: 0.8rem 1.5rem; cursor: pointer; font-weight: 600; color: #888; border-bottom: 3px solid transparent; transition: all 0.2s; font-size: 1rem; }
+        .tab:hover { color: #4361ee; }
+        .tab.active { color: #4361ee; border-bottom-color: #4361ee; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* 批量处理文件列表 */
+        .batch-file-list { margin-top: 1rem; }
+        .batch-file-item { display: flex; align-items: center; gap: 0.8rem; padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 0.5rem; background: #f8f9fa; font-size: 0.9rem; }
+        .batch-file-item .file-index { color: #888; font-weight: 600; min-width: 28px; }
+        .batch-file-item .file-name { flex: 1; font-weight: 500; }
+        .batch-file-item .file-status { font-size: 0.8rem; padding: 0.2rem 0.6rem; border-radius: 12px; font-weight: 600; }
+        .status-pending { background: #e8ecf1; color: #666; }
+        .status-running { background: #fff3cd; color: #856404; }
+        .status-success { background: #d4edda; color: #155724; }
+        .status-fail { background: #f8d7da; color: #721c24; }
+        .status-noresult { background: #e2e3e5; color: #383d41; }
+        .batch-file-item .file-count { font-size: 0.8rem; color: #666; min-width: 60px; text-align: right; }
+        .batch-file-item .file-action { min-width: 80px; text-align: right; }
+        .batch-file-item .file-action a { font-size: 0.8rem; }
+
+        /* 文件夹输入 */
+        .folder-input-wrapper { display: flex; gap: 0.5rem; align-items: center; }
+        .folder-input-wrapper input { flex: 1; }
+        .folder-hint { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+
+        /* 批量汇总 */
+        .batch-summary { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+        .summary-item { background: #f0f4ff; border-radius: 8px; padding: 0.8rem 1.2rem; text-align: center; flex: 1; min-width: 100px; }
+        .summary-item .num { font-size: 1.5rem; font-weight: 700; color: #4361ee; }
+        .summary-item .label { font-size: 0.8rem; color: #666; margin-top: 0.2rem; }
+        .summary-item.success .num { color: #2ecc71; }
+        .summary-item.fail .num { color: #e74c3c; }
     </style>
 </head>
 <body>
@@ -53,21 +87,35 @@
         <h1>学术评论句提取工具</h1>
         <p class="subtitle">上传学术论文 PDF，自动识别学术评论句，生成 Excel 汇总表、Word 登记表和高亮 PDF</p>
 
-        <div class="card">
-            <h2>上传与设置</h2>
-            <div class="file-upload" id="dropZone" onclick="document.getElementById('pdfFile').click()">
-                <input type="file" id="pdfFile" accept=".pdf">
-                <div class="icon">📄</div>
-                <div class="text">点击或拖拽上传论文 PDF</div>
-                <div class="filename hidden" id="fileName"></div>
-            </div>
+        <!-- Tab 切换 -->
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('single')">单篇上传</div>
+            <div class="tab" onclick="switchTab('batch')">批量处理</div>
+        </div>
 
-            <div class="form-row" style="margin-top: 1rem;">
+        <!-- ======== 公共设置 ======== -->
+        <div class="card">
+            <h2>API 设置</h2>
+            <div class="form-row">
                 <div class="form-group">
                     <label>选择模型</label>
                     <select id="model">
                         <option value="claude-sonnet-4-6">claude-sonnet-4-6 (默认)</option>
-                        <option value="claude-opus-4-6">claude-opus-4-6 (更高精度)</option>
+                        <option value="claude-opus-4-6">claude-opus-4-6</option>
+                        <option value="claude-opus-4-7-thinking">claude-opus-4-7-thinking</option>
+                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                        <option value="gemini-2.5-pro-thinking">gemini-2.5-pro-thinking</option>
+                        <option value="gemini-2.5-pro-thinking-128">gemini-2.5-pro-thinking-128</option>
+                        <option value="gemini-2.5-pro-thinking-512">gemini-2.5-pro-thinking-512</option>
+                        <option value="kimi-k2.5">kimi-k2.5</option>
+                        <option value="kimi-k2.6-code-preview">kimi-k2.6-code-preview</option>
+                        <option value="gpt-5.4">gpt-5.4</option>
+                        <option value="gpt-5.2">gpt-5.2</option>
+                        <option value="glm-5">glm-5</option>
+                        <option value="glm-5-turbo">glm-5-turbo</option>
+                        <option value="glm-5.1">glm-5.1</option>
+                        <option value="MiniMax-M2.7">MiniMax-M2.7</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -75,8 +123,7 @@
                     <input type="text" id="provider" placeholder="姓名/导师 学校 日期">
                 </div>
             </div>
-
-            <div class="accordion" onclick="toggleAccordion()">API 设置 (点击展开)</div>
+            <div class="accordion" onclick="toggleAccordion()">API 连接设置 (点击展开)</div>
             <div class="accordion-content" id="apiSettings">
                 <div class="form-row" style="padding: 0.5rem 0;">
                     <div class="form-group">
@@ -89,36 +136,94 @@
                     </div>
                 </div>
             </div>
+        </div>
 
-            <button class="btn btn-primary" id="startBtn" onclick="startAnalysis()">
-                开始分析
-            </button>
+        <!-- ======== 单篇上传 Tab ======== -->
+        <div id="tab-single" class="tab-content active">
+            <div class="card">
+                <h2>上传 PDF</h2>
+                <div class="file-upload" id="dropZone" onclick="document.getElementById('pdfFile').click()">
+                    <input type="file" id="pdfFile" accept=".pdf">
+                    <div class="icon">📄</div>
+                    <div class="text">点击或拖拽上传论文 PDF</div>
+                    <div class="filename hidden" id="fileName"></div>
+                </div>
 
-            <div class="progress hidden" id="progressArea">
-                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-                <div class="progress-text" id="progressText">准备中...</div>
+                <button class="btn btn-primary" id="singleBtn" onclick="startSingleAnalysis()" style="margin-top: 1rem;">
+                    开始分析
+                </button>
+
+                <div class="progress hidden" id="singleProgress">
+                    <div class="progress-bar"><div class="progress-fill" id="singleProgressFill"></div></div>
+                    <div class="progress-text" id="singleProgressText">准备中...</div>
+                </div>
+            </div>
+
+            <div class="card hidden" id="singleResultCard">
+                <h2>处理结果</h2>
+                <div id="singleOutputDir" style="margin-bottom: 1rem; font-size: 0.9rem; color: #666;"></div>
+                <div class="preview" id="singlePreview"></div>
+                <details style="margin-top: 1rem;">
+                    <summary style="cursor: pointer; color: #666; font-size: 0.85rem;">查看处理日志</summary>
+                    <div class="log-box" id="singleLogBox"></div>
+                </details>
             </div>
         </div>
 
-        <div class="card hidden" id="resultCard">
-            <h2>处理结果</h2>
+        <!-- ======== 批量处理 Tab ======== -->
+        <div id="tab-batch" class="tab-content">
+            <div class="card">
+                <h2>批量处理</h2>
+                <div class="form-group">
+                    <label>本地文件夹路径</label>
+                    <input type="text" id="folderPath" placeholder="例如: /Users/xxx/Documents/papers">
+                    <div class="folder-hint">输入包含 PDF 文件的文件夹绝对路径，工具将自动读取其中所有 PDF 文件</div>
+                </div>
 
-            <div class="downloads" id="downloadArea"></div>
+                <button class="btn btn-primary" id="batchBtn" onclick="startBatchAnalysis()" style="margin-top: 1rem;">
+                    开始批量分析
+                </button>
 
-            <div class="preview" id="previewArea"></div>
+                <div class="progress hidden" id="batchProgress">
+                    <div class="progress-bar"><div class="progress-fill" id="batchProgressFill"></div></div>
+                    <div class="progress-text" id="batchProgressText">准备中...</div>
+                </div>
+            </div>
 
-            <details style="margin-top: 1rem;">
-                <summary style="cursor: pointer; color: #666; font-size: 0.85rem;">查看处理日志</summary>
-                <div class="log-box" id="logBox"></div>
-            </details>
+            <div class="card hidden" id="batchResultCard">
+                <h2>批量处理结果</h2>
+                <div class="batch-summary" id="batchSummary"></div>
+                <div class="batch-file-list" id="batchFileList"></div>
+            </div>
         </div>
     </div>
 
     <script>
+        // ──────── Tab 切换 ────────
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.tab-content#tab-${tab}`).classList.add('active');
+            document.querySelectorAll('.tab')[tab === 'single' ? 0 : 1].classList.add('active');
+        }
+
+        function toggleAccordion() {
+            document.getElementById('apiSettings').classList.toggle('open');
+        }
+
+        function getCommonParams() {
+            return {
+                model: document.getElementById('model').value,
+                api_key: document.getElementById('apiKey').value,
+                base_url: document.getElementById('baseUrl').value,
+                provider: document.getElementById('provider').value,
+            };
+        }
+
+        // ──────── 单篇上传 ────────
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('pdfFile');
 
-        // 拖拽上传
         dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#4361ee'; });
         dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#ccc'; });
         dropZone.addEventListener('drop', e => {
@@ -129,7 +234,6 @@
                 showFileName(e.dataTransfer.files[0].name);
             }
         });
-
         fileInput.addEventListener('change', () => {
             if (fileInput.files.length) showFileName(fileInput.files[0].name);
         });
@@ -141,55 +245,42 @@
             dropZone.classList.add('has-file');
         }
 
-        function toggleAccordion() {
-            document.getElementById('apiSettings').classList.toggle('open');
-        }
-
-        async function startAnalysis() {
+        async function startSingleAnalysis() {
             const file = fileInput.files[0];
             if (!file) { alert('请先上传 PDF 文件'); return; }
 
-            const btn = document.getElementById('startBtn');
-            const progressArea = document.getElementById('progressArea');
-            const resultCard = document.getElementById('resultCard');
+            const btn = document.getElementById('singleBtn');
+            const progress = document.getElementById('singleProgress');
+            const resultCard = document.getElementById('singleResultCard');
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span>分析中（可能需要1-2分钟）...';
-            progressArea.classList.remove('hidden');
+            btn.innerHTML = '<span class="spinner"></span>分析中...';
+            progress.classList.remove('hidden');
             resultCard.classList.add('hidden');
-            document.getElementById('progressFill').style.width = '30%';
-            document.getElementById('progressText').textContent = '正在处理，请耐心等待...';
+            document.getElementById('singleProgressFill').style.width = '30%';
+            document.getElementById('singleProgressText').textContent = '正在处理，请耐心等待...';
 
+            const params = getCommonParams();
             const formData = new FormData();
             formData.append('pdf_file', file);
-            formData.append('model', document.getElementById('model').value);
-            formData.append('api_key', document.getElementById('apiKey').value);
-            formData.append('base_url', document.getElementById('baseUrl').value);
-            formData.append('provider', document.getElementById('provider').value);
+            formData.append('model', params.model);
+            formData.append('api_key', params.api_key);
+            formData.append('base_url', params.base_url);
+            formData.append('provider', params.provider);
 
             try {
                 const resp = await fetch('/api/analyze', { method: 'POST', body: formData });
-
                 if (!resp.ok) {
                     const text = await resp.text();
-                    if (resp.status === 504 || text.includes('FUNCTION_INVOCATION_TIMEOUT')) {
-                        alert('处理超时：PDF 文件过大或 LLM 响应较慢，请稍后重试或使用更小的文件。');
-                    } else {
-                        alert('服务器错误 (' + resp.status + '): ' + text.substring(0, 200));
-                    }
+                    alert('服务器错误: ' + text.substring(0, 300));
                     return;
                 }
-
                 const result = await resp.json();
+                if (result.error) { alert('处理失败: ' + result.error); return; }
 
-                if (result.error) {
-                    alert('处理失败: ' + result.error);
-                    return;
-                }
-
-                document.getElementById('progressFill').style.width = '100%';
-                document.getElementById('progressText').textContent = '处理完成！';
-                showResults(result);
+                document.getElementById('singleProgressFill').style.width = '100%';
+                document.getElementById('singleProgressText').textContent = '处理完成！';
+                showSingleResult(result);
             } catch (e) {
                 alert('请求失败: ' + e.message);
             } finally {
@@ -198,42 +289,20 @@
             }
         }
 
-        function base64ToBlob(b64, mime) {
-            const byteChars = atob(b64);
-            const byteArr = new Uint8Array(byteChars.length);
-            for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
-            return new Blob([byteArr], { type: mime });
-        }
+        function showSingleResult(result) {
+            const card = document.getElementById('singleResultCard');
+            card.classList.remove('hidden');
 
-        function createDownloadLink(label, fileName, b64Data, mime) {
-            const blob = base64ToBlob(b64Data, mime);
-            const url = URL.createObjectURL(blob);
-            return `<a class="btn-download" href="${url}" download="${fileName}">${label}</a>`;
-        }
-
-        function showResults(result) {
-            const resultCard = document.getElementById('resultCard');
-            resultCard.classList.remove('hidden');
-
-            // 下载链接 - 从 base64 数据生成 Blob URL
-            const dl = document.getElementById('downloadArea');
-            dl.innerHTML = '';
-            const files = result.files || {};
-            if (files.zip && files.zip.data) {
-                dl.innerHTML += createDownloadLink('📦 全部打包下载', files.zip.name, files.zip.data, 'application/zip');
+            // 输出目录提示
+            const dirEl = document.getElementById('singleOutputDir');
+            if (result.output_dir) {
+                dirEl.innerHTML = `结果已保存到: <strong>${result.output_dir}</strong>`;
+            } else {
+                dirEl.innerHTML = '';
             }
-            if (files.highlighted_pdf && files.highlighted_pdf.data) {
-                dl.innerHTML += createDownloadLink('📄 高亮 PDF', files.highlighted_pdf.name, files.highlighted_pdf.data, 'application/pdf');
-            }
-            if (files.excel && files.excel.data) {
-                dl.innerHTML += createDownloadLink('📊 Excel 汇总表', files.excel.name, files.excel.data, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            }
-            Object.keys(files).filter(k => k.startsWith('word_')).forEach((k, i) => {
-                dl.innerHTML += createDownloadLink(`📝 登记表 ${i+1}`, files[k].name, files[k].data, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-            });
 
             // 预览
-            const preview = document.getElementById('previewArea');
+            const preview = document.getElementById('singlePreview');
             preview.innerHTML = '<h3 style="margin-bottom:0.8rem;font-size:1rem;">识别到 ' + result.count + ' 条学术评论句</h3>';
             (result.records || []).forEach((r, i) => {
                 preview.innerHTML += `
@@ -249,8 +318,165 @@
                     </div>`;
             });
 
-            // 日志
-            document.getElementById('logBox').textContent = result.log || '';
+            document.getElementById('singleLogBox').textContent = result.log || '';
+        }
+
+        // ──────── 批量处理 ────────
+        async function startBatchAnalysis() {
+            const folder = document.getElementById('folderPath').value.trim();
+            if (!folder) { alert('请输入文件夹路径'); return; }
+
+            const btn = document.getElementById('batchBtn');
+            const progress = document.getElementById('batchProgress');
+            const resultCard = document.getElementById('batchResultCard');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>扫描文件夹...';
+            progress.classList.remove('hidden');
+            resultCard.classList.remove('hidden');
+
+            const params = getCommonParams();
+            const formData = new FormData();
+            formData.append('folder_path', folder);
+            formData.append('model', params.model);
+            formData.append('api_key', params.api_key);
+            formData.append('base_url', params.base_url);
+            formData.append('provider', params.provider);
+
+            try {
+                const resp = await fetch('/api/batch', { method: 'POST', body: formData });
+                if (!resp.ok) {
+                    const data = await resp.json().catch(() => ({ error: '未知错误' }));
+                    alert('启动失败: ' + (data.error || resp.statusText));
+                    btn.disabled = false;
+                    btn.innerHTML = '开始批量分析';
+                    return;
+                }
+
+                const data = await resp.json();
+                const taskId = data.task_id;
+                const total = data.total;
+
+                btn.innerHTML = `<span class="spinner"></span>处理中 (0/${total})...`;
+
+                // 初始化文件列表
+                initBatchFileList(data.files);
+
+                // 轮询状态
+                while (true) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    const status = await fetch(`/api/batch/status/${taskId}`).then(r => r.json());
+
+                    const pct = Math.round((status.completed / status.total) * 100);
+                    document.getElementById('batchProgressFill').style.width = pct + '%';
+                    document.getElementById('batchProgressText').textContent =
+                        status.current_file
+                            ? `[${status.completed}/${status.total}] ${status.current_file}: ${status.current_step}`
+                            : `${status.completed}/${status.total} 已完成`;
+
+                    btn.innerHTML = `<span class="spinner"></span>处理中 (${status.completed}/${status.total})...`;
+
+                    // 更新文件列表状态
+                    updateBatchFileList(status);
+
+                    if (status.done) {
+                        document.getElementById('batchProgressFill').style.width = '100%';
+                        document.getElementById('batchProgressText').textContent = '全部处理完成！';
+                        showBatchSummary(status);
+                        break;
+                    }
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '开始批量分析';
+            }
+        }
+
+        function initBatchFileList(fileNames) {
+            const list = document.getElementById('batchFileList');
+            list.innerHTML = '';
+            fileNames.forEach((name, i) => {
+                list.innerHTML += `
+                    <div class="batch-file-item" id="batch-file-${i}">
+                        <span class="file-index">${i + 1}</span>
+                        <span class="file-name">${name}</span>
+                        <span class="file-count" id="batch-count-${i}">-</span>
+                        <span class="file-status status-pending" id="batch-status-${i}">等待中</span>
+                        <span class="file-action" id="batch-action-${i}"></span>
+                    </div>`;
+            });
+
+            document.getElementById('batchSummary').innerHTML = '';
+        }
+
+        function updateBatchFileList(status) {
+            const results = status.results || [];
+            const currentIdx = results.length;
+
+            results.forEach((r, i) => {
+                const statusEl = document.getElementById(`batch-status-${i}`);
+                const countEl = document.getElementById(`batch-count-${i}`);
+                const actionEl = document.getElementById(`batch-action-${i}`);
+                if (!statusEl) return;
+
+                if (r.status === '成功') {
+                    statusEl.className = 'file-status status-success';
+                    statusEl.textContent = '成功';
+                    countEl.textContent = `${r.count} 条`;
+                    if (r.output_dir) {
+                        actionEl.innerHTML = `<span style="font-size:0.75rem;color:#4361ee;word-break:break-all;">${r.output_dir}</span>`;
+                    }
+                } else if (r.status === '无结果') {
+                    statusEl.className = 'file-status status-noresult';
+                    statusEl.textContent = '无结果';
+                    countEl.textContent = '0 条';
+                } else {
+                    statusEl.className = 'file-status status-fail';
+                    statusEl.textContent = '失败';
+                    countEl.textContent = '-';
+                }
+            });
+
+            // 标记当前正在处理的文件
+            if (currentIdx < status.total && !status.done) {
+                const statusEl = document.getElementById(`batch-status-${currentIdx}`);
+                if (statusEl) {
+                    statusEl.className = 'file-status status-running';
+                    statusEl.textContent = '处理中...';
+                }
+            }
+        }
+
+        function showBatchSummary(status) {
+            const results = status.results || [];
+            const success = results.filter(r => r.status === '成功');
+            const noResult = results.filter(r => r.status === '无结果');
+            const failed = results.filter(r => r.status.startsWith('失败'));
+            const totalCount = results.reduce((s, r) => s + r.count, 0);
+
+            document.getElementById('batchSummary').innerHTML = `
+                <div class="summary-item">
+                    <div class="num">${results.length}</div>
+                    <div class="label">总计</div>
+                </div>
+                <div class="summary-item success">
+                    <div class="num">${success.length}</div>
+                    <div class="label">成功</div>
+                </div>
+                <div class="summary-item">
+                    <div class="num">${totalCount}</div>
+                    <div class="label">评论句总数</div>
+                </div>
+                <div class="summary-item">
+                    <div class="num">${noResult.length}</div>
+                    <div class="label">无结果</div>
+                </div>
+                <div class="summary-item fail">
+                    <div class="num">${failed.length}</div>
+                    <div class="label">失败</div>
+                </div>`;
         }
     </script>
 </body>
