@@ -151,7 +151,19 @@ def highlight_sentences(
         else:
             logger.warning(f"未找到句子位置: {sentence[:50]}...")
 
-    doc.save(output_pdf_path)
+    try:
+        doc.save(output_pdf_path)
+    except Exception as e:
+        logger.warning(f"PDF 高亮保存失败，尝试增量保存: {e}")
+        try:
+            doc.save(output_pdf_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+        except Exception as e2:
+            logger.error(f"PDF 高亮保存彻底失败，跳过高亮步骤: {e2}")
+            # 复制原始 PDF 作为输出，确保流程不中断
+            import shutil
+            doc.close()
+            shutil.copy2(input_pdf_path, output_pdf_path)
+            return 0
     doc.close()
 
     return highlighted_count

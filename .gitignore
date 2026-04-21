@@ -208,6 +208,7 @@ __marimo__/
 
 # Project specific
 output/
+logs/
 .DS_Store
 【输入*
 【输出*

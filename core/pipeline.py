@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from config import AppConfig
-from core.llm_analyzer import AnalysisResult, CommentRecord, call_llm
+from core.llm_analyzer import AnalysisResult, CommentRecord, ReviewingPaper, call_llm
 from core.pdf_parser import PaperMetadata, parse_pdf
 from core.ref_parser import parse_references, find_reference_by_author_year
 from core.pdf_highlighter import highlight_sentences
@@ -78,6 +78,35 @@ def process_paper(
     )
     records = analysis_result.评论句记录
     _log(f"  - 识别到 {len(records)} 条学术评论句")
+
+    # ── 步骤3.1: 用 LLM 提取的施评文献信息覆盖正则结果 ──
+    reviewing = analysis_result.施评文献
+    if reviewing.第一作者:
+        _log("  - 使用 LLM 提取的施评文献元数据补充/覆盖正则结果")
+        # 判断是中文还是英文作者
+        _is_cn = any('\u4e00' <= c <= '\u9fff' for c in reviewing.第一作者)
+        if _is_cn:
+            metadata.first_author_cn = metadata.first_author_cn or reviewing.第一作者
+            if reviewing.全部作者:
+                all_authors = [a.strip() for a in reviewing.全部作者.split(",")]
+                metadata.authors_cn = metadata.authors_cn or all_authors
+        else:
+            metadata.first_author_en = metadata.first_author_en or reviewing.第一作者
+            if reviewing.全部作者:
+                all_authors = [a.strip() for a in reviewing.全部作者.split(",")]
+                metadata.authors_en = metadata.authors_en or all_authors
+        metadata.title_cn = metadata.title_cn or (reviewing.文章名 if any('\u4e00' <= c <= '\u9fff' for c in reviewing.文章名) else "")
+        metadata.title_en = metadata.title_en or (reviewing.文章名 if not any('\u4e00' <= c <= '\u9fff' for c in reviewing.文章名) else "")
+        metadata.journal_cn = metadata.journal_cn or (reviewing.期刊名称 if any('\u4e00' <= c <= '\u9fff' for c in reviewing.期刊名称) else "")
+        metadata.journal_en = metadata.journal_en or (reviewing.期刊名称 if not any('\u4e00' <= c <= '\u9fff' for c in reviewing.期刊名称) else "")
+        metadata.year = metadata.year or reviewing.年份
+        metadata.volume = metadata.volume or reviewing.卷
+        metadata.issue = metadata.issue or reviewing.期
+        metadata.pages = metadata.pages or reviewing.起止页码
+        metadata.institution_cn = metadata.institution_cn or (reviewing.第一作者机构 if any('\u4e00' <= c <= '\u9fff' for c in reviewing.第一作者机构) else "")
+        metadata.institution_en = metadata.institution_en or (reviewing.第一作者机构 if not any('\u4e00' <= c <= '\u9fff' for c in reviewing.第一作者机构) else "")
+        metadata.country = metadata.country if metadata.country != "中国" else reviewing.第一作者国家 or "中国"
+        _log(f"  - 施评文献: {metadata.first_author}, {metadata.title_cn or metadata.title_en}")
 
     # ── 步骤3.5: 后处理校验 ──
     # 用解析出的参考文献列表做二次校验，剔除非期刊论文

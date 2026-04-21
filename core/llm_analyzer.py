@@ -21,6 +21,21 @@ logger = logging.getLogger(__name__)
 
 # ── Pydantic 数据模型 ──────────────────────────────────────────────
 
+class ReviewingPaper(BaseModel):
+    """施评文献信息（本篇论文自身的元数据）"""
+    全部作者: str = ""
+    第一作者: str = ""
+    其他作者: str = ""
+    文章名: str = ""
+    期刊名称: str = ""
+    年份: str = ""
+    卷: str = ""
+    期: str = ""
+    起止页码: str = ""
+    第一作者机构: str = ""
+    第一作者国家: str = ""
+
+
 class EvaluatedPaper(BaseModel):
     """被评文献信息"""
     全部作者列表: list[str] = []
@@ -52,6 +67,7 @@ class CommentRecord(BaseModel):
 
 class AnalysisResult(BaseModel):
     """分析结果"""
+    施评文献: ReviewingPaper = ReviewingPaper()
     评论句记录: list[CommentRecord] = []
 
 
@@ -107,29 +123,18 @@ def call_llm(
         full_text=full_text,
     )
 
-    last_error = None
-    for attempt in range(1, config.max_retries + 1):
-        if progress_callback:
-            progress_callback(f"正在调用大模型分析（第 {attempt} 次尝试）...")
+    if progress_callback:
+        progress_callback("正在调用大模型分析...")
 
-        try:
-            response_text = _api_call(config, user_prompt)
-            cleaned = _clean_json_response(response_text)
-            result = AnalysisResult.model_validate_json(cleaned)
-            logger.info(f"成功解析到 {len(result.评论句记录)} 条评论句记录")
-            return result
-
-        except json.JSONDecodeError as e:
-            last_error = e
-            logger.warning(f"第 {attempt} 次尝试：JSON 解析失败 - {e}")
-        except Exception as e:
-            last_error = e
-            logger.warning(f"第 {attempt} 次尝试：失败 - {e}")
-
-    logger.error(f"所有 {config.max_retries} 次尝试均失败")
-    raise RuntimeError(
-        f"大模型分析失败（已重试 {config.max_retries} 次）：{last_error}"
-    )
+    try:
+        response_text = _api_call(config, user_prompt)
+        cleaned = _clean_json_response(response_text)
+        result = AnalysisResult.model_validate_json(cleaned)
+        logger.info(f"成功解析到 {len(result.评论句记录)} 条评论句记录")
+        return result
+    except Exception as e:
+        logger.error(f"大模型分析失败: {e}")
+        raise RuntimeError(f"大模型分析失败：{e}")
 
 
 def _api_call(config: LLMConfig, user_prompt: str) -> str:
@@ -145,14 +150,14 @@ def _api_call(config: LLMConfig, user_prompt: str) -> str:
     payload = {
         "model": config.model,
         "temperature": config.temperature,
-        "max_tokens": 8192,
+        "max_tokens": 16384,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
     }
 
-    with httpx.Client(timeout=120.0) as client:
+    with httpx.Client(timeout=300.0) as client:
         response = client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()

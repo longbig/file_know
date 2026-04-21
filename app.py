@@ -6,6 +6,7 @@ import sys
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
@@ -17,10 +18,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import AppConfig, LLMConfig
 from core.pipeline import process_paper
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# 日志同时输出到控制台和文件
+log_file = os.path.join(LOG_DIR, f"app_{datetime.now().strftime('%Y%m%d')}.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_file, encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger(__name__)
 
