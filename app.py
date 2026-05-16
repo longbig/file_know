@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import AppConfig, LLMConfig
 from core.pipeline import process_paper
+from core.excel_writer import write_merged_excel
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(BASE_DIR, "logs")
@@ -142,6 +143,8 @@ async def batch_analyze(
 
 def _run_batch(task_id: str, pdf_files: list[str], config: AppConfig, provider: str):
     """后台线程：逐个处理 PDF"""
+    paper_data_list = []  # 收集每篇论文的数据，用于生成合并 Excel
+
     for i, pdf_path in enumerate(pdf_files):
         pdf_name = Path(pdf_path).stem
         tasks[task_id]["current_file"] = pdf_name
@@ -167,6 +170,14 @@ def _run_batch(task_id: str, pdf_files: list[str], config: AppConfig, provider: 
                               + result.get("word_paths", [])):
                         if p and os.path.exists(p):
                             zf.write(p, os.path.basename(p))
+
+                # 收集合并 Excel 数据
+                paper_data_list.append({
+                    "records": result["records"],
+                    "metadata": result["metadata"],
+                    "institution_results": result.get("institution_results"),
+                    "provider": provider,
+                })
             else:
                 zip_path = ""
 
@@ -187,9 +198,22 @@ def _run_batch(task_id: str, pdf_files: list[str], config: AppConfig, provider: 
 
         tasks[task_id]["completed"] = i + 1
 
+    # 生成合并 Excel
+    merged_excel_path = ""
+    if paper_data_list:
+        tasks[task_id]["current_step"] = "生成合并汇总表..."
+        merged_excel_path = os.path.join(config.output_dir, "合并汇总表.xlsx")
+        try:
+            write_merged_excel(merged_excel_path, paper_data_list)
+            logger.info(f"合并 Excel 已保存: {merged_excel_path}")
+        except Exception as e:
+            logger.error(f"生成合并 Excel 失败: {e}")
+            merged_excel_path = ""
+
     tasks[task_id]["done"] = True
     tasks[task_id]["current_file"] = ""
     tasks[task_id]["current_step"] = "全部完成"
+    tasks[task_id]["merged_excel_path"] = merged_excel_path
 
 
 def _update_step(task_id: str, msg: str):

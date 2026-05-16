@@ -24,6 +24,7 @@ class Reference:
     pages: str = ""
     ref_type: str = ""  # J=期刊, C=会议, D=学位论文, M=专著, P=专利, S=标准
     is_journal: bool = False
+    doi: str = ""  # DOI 标识符
 
 
 def extract_references_section(full_text: str) -> str:
@@ -108,6 +109,13 @@ def _parse_chinese_ref(text: str) -> Reference:
         ref.issue = vol_issue_match.group(3)
         ref.pages = vol_issue_match.group(4).strip().rstrip('.')
 
+    # 提取 DOI
+    doi_match = re.search(r'(?:DOI|doi)[：:\s]*\s*(10\.\d{4,}/\S+)', text)
+    if not doi_match:
+        doi_match = re.search(r'(10\.\d{4,}/\S+)', text)
+    if doi_match:
+        ref.doi = doi_match.group(1).rstrip('.')
+
     return ref
 
 
@@ -155,6 +163,13 @@ def _parse_english_ref(text: str) -> Reference:
             ref.pages = vol_match.group(4).strip().rstrip('.')
         else:
             ref.pages = vol_match.group(3).strip().rstrip('.')
+
+    # 提取 DOI
+    doi_match = re.search(r'(?:DOI|doi)[：:\s]*\s*(10\.\d{4,}/\S+)', text)
+    if not doi_match:
+        doi_match = re.search(r'(10\.\d{4,}/\S+)', text)
+    if doi_match:
+        ref.doi = doi_match.group(1).rstrip('.')
 
     return ref
 

@@ -110,6 +110,8 @@ def process_paper(
 
     # ── 步骤3.5: 后处理校验 ──
     # 用解析出的参考文献列表做二次校验，剔除非期刊论文
+    # 同时保存匹配到的 Reference（含 DOI）供步骤4使用
+    matched_refs = {}  # record index → Reference
     if records and references:
         validated_records = []
         for record in records:
@@ -134,6 +136,8 @@ def process_paper(
                     record.被评文献.期 = matched_ref.issue
                 if not record.被评文献.起止页码 and matched_ref.pages:
                     record.被评文献.起止页码 = matched_ref.pages
+                # 保存匹配的 Reference（含 DOI）
+                matched_refs[len(validated_records)] = matched_ref
                 validated_records.append(record)
 
         if len(validated_records) < len(records):
@@ -152,34 +156,57 @@ def process_paper(
             "log": log,
         }
 
-    # ── 步骤4: 查询机构信息 ──
+    # ── 步骤4: 查询机构信息（三级回退）──
     _log("步骤 4/7: 查询被评文献作者机构信息...")
-    papers_to_lookup = []
-    for r in records:
-        papers_to_lookup.append({
-            "title": r.被评文献.文章名,
-            "first_author": r.被评文献.第一作者,
-            "year": r.被评文献.年份,
-        })
-    institution_results = batch_lookup(
-        papers_to_lookup,
-        progress_callback=lambda msg: _log(f"  - {msg}"),
-    )
-    for i, inst in enumerate(institution_results):
-        if inst.get("institution"):
-            _log(f"  - [{i+1}] 机构: {inst['institution']}, 国家: {inst['country']}")
+    institution_results = []
+    for i, r in enumerate(records):
+        ep = r.被评文献
+        inst_info = {"institution": "", "country": "", "doi": ""}
+
+        # 级别1：检查 LLM 已填写的机构信息
+        if ep.第一作者机构:
+            _log(f"  - [{i+1}] LLM 已推断机构: {ep.第一作者机构}, {ep.第一作者国家}")
+            inst_info["institution"] = ep.第一作者机构
+            inst_info["country"] = ep.第一作者国家
+            institution_results.append(inst_info)
+            continue
+
+        # 级别2：尝试 DOI 精确查询
+        ref_doi = ""
+        if i in matched_refs and matched_refs[i].doi:
+            ref_doi = matched_refs[i].doi
+            _log(f"  - [{i+1}] 尝试 DOI 查询: {ref_doi}")
+
+        # 级别2+3：DOI 查询 → 标题搜索（由 lookup_institution 内部处理回退）
+        from core.institution_lookup import lookup_institution
+        lookup_result = lookup_institution(
+            title=ep.文章名,
+            first_author=ep.第一作者,
+            year=ep.年份,
+            doi=ref_doi,
+        )
+
+        if lookup_result.get("institution"):
+            _log(f"  - [{i+1}] CrossRef 查询成功: {lookup_result['institution']}, "
+                 f"{lookup_result['country']}")
+            # 将查询结果写回 record
+            ep.第一作者机构 = lookup_result["institution"]
+            ep.第一作者国家 = lookup_result["country"]
         else:
             _log(f"  - [{i+1}] 未查询到机构信息")
 
+        institution_results.append(lookup_result)
+
     # ── 步骤5: PDF 高亮 ──
-    _log("步骤 5/7: 在 PDF 中高亮标记评论句...")
+    _log("步骤 5/7: 在 PDF 中高亮标记评论句和被评文献...")
     highlighted_pdf_path = os.path.join(output_dir, f"{pdf_name}_高亮标注.pdf")
-    sentences = [r.评论句原文 for r in records]
     highlighted_count = highlight_sentences(
-        pdf_path, highlighted_pdf_path, sentences,
+        pdf_path, highlighted_pdf_path,
+        records=records,
+        references=references,
         progress_callback=lambda msg: _log(f"  - {msg}"),
     )
-    _log(f"  - 成功高亮 {highlighted_count}/{len(sentences)} 条句子")
+    _log(f"  - 成功高亮 {highlighted_count}/{len(records)} 条评论句")
 
     # ── 步骤6: 生成 Excel ──
     _log("步骤 6/7: 生成 Excel 汇总表...")
@@ -205,5 +232,6 @@ def process_paper(
         "word_paths": word_paths,
         "highlighted_pdf_path": highlighted_pdf_path,
         "metadata": metadata,
+        "institution_results": institution_results,
         "log": log,
     }

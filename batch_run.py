@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import AppConfig, LLMConfig
 from core.pipeline import process_paper
+from core.excel_writer import write_merged_excel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,7 +59,7 @@ def process_single(pdf_path: str, config: AppConfig, provider: str, index: int, 
         record_count = len(result["records"])
         if record_count == 0:
             logger.warning(f"  未找到学术评论句，跳过文件生成")
-            return {"name": pdf_name, "count": 0, "status": "无结果"}
+            return {"name": pdf_name, "count": 0, "status": "无结果", "paper_data": None}
 
         # 打包 zip
         out_dir = os.path.join(config.output_dir, pdf_name)
@@ -74,11 +75,19 @@ def process_single(pdf_path: str, config: AppConfig, provider: str, index: int, 
 
         logger.info(f"  识别到 {record_count} 条学术评论句")
         logger.info(f"  结果已保存: {out_dir}")
-        return {"name": pdf_name, "count": record_count, "status": "成功"}
+
+        # 保存合并 Excel 所需的数据
+        paper_data = {
+            "records": result["records"],
+            "metadata": result["metadata"],
+            "institution_results": result.get("institution_results"),
+            "provider": provider,
+        }
+        return {"name": pdf_name, "count": record_count, "status": "成功", "paper_data": paper_data}
 
     except Exception as e:
         logger.error(f"  处理失败: {e}")
-        return {"name": pdf_name, "count": 0, "status": f"失败: {e}"}
+        return {"name": pdf_name, "count": 0, "status": f"失败: {e}", "paper_data": None}
 
 
 def main():
@@ -139,6 +148,14 @@ def main():
     for i, pdf_path in enumerate(pdf_files, 1):
         result = process_single(pdf_path, config, args.provider, i, len(pdf_files))
         results.append(result)
+
+    # 生成合并 Excel
+    paper_data_list = [r["paper_data"] for r in results if r.get("paper_data")]
+    merged_excel_path = ""
+    if paper_data_list:
+        merged_excel_path = os.path.join(output_dir, "合并汇总表.xlsx")
+        write_merged_excel(merged_excel_path, paper_data_list)
+        logger.info(f"合并 Excel 已保存: {merged_excel_path}")
 
     # 汇总报告
     logger.info(f"\n{'='*60}")

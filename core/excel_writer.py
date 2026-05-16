@@ -255,3 +255,127 @@ def write_excel(
     wb.save(output_path)
     logger.info(f"Excel 汇总表已保存: {output_path}")
     return output_path
+
+
+def write_merged_excel(
+    output_path: str,
+    paper_results: list[dict],
+) -> str:
+    """将多篇论文的评论句合并到一个 Excel 文件
+
+    Args:
+        output_path: 输出文件路径
+        paper_results: 每篇论文的处理结果列表，每个 dict 包含:
+            - records: list[CommentRecord]
+            - metadata: PaperMetadata
+            - institution_results: list[dict] | None
+            - provider: str
+
+    Returns:
+        输出文件路径
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "汇总"
+
+    # 样式定义
+    header_font = Font(name="Times New Roman", bold=True, size=11)
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    cell_font = Font(name="Times New Roman", size=11)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    wrap_alignment = Alignment(wrap_text=True, vertical="center")
+
+    # 写入表头
+    for col, header in enumerate(HEADERS, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = wrap_alignment
+
+    # 全局行号（跨论文连续编号）
+    global_row = 2
+    global_index = 1
+
+    for paper in paper_results:
+        records = paper["records"]
+        metadata = paper["metadata"]
+        institution_results = paper.get("institution_results")
+        provider = paper.get("provider", "")
+
+        if not records:
+            continue
+
+        # 预计算施评文献信息
+        citation = _format_citation(metadata)
+        journal_year_vol = _format_journal_year_vol(metadata)
+        vol_issue_pages = _format_vol_issue_pages(metadata)
+
+        for i, record in enumerate(records):
+            ep = record.被评文献
+
+            inst = {}
+            if institution_results and i < len(institution_results):
+                inst = institution_results[i]
+
+            eval_institution = ep.第一作者机构 or inst.get("institution", "")
+            eval_country = ep.第一作者国家 or inst.get("country", "")
+
+            row_data = [
+                global_index,
+                citation,
+                metadata.first_author,
+                metadata.other_authors,
+                metadata.title_cn or metadata.title_en,
+                journal_year_vol,
+                metadata.journal_cn or metadata.journal_en,
+                metadata.year,
+                vol_issue_pages,
+                metadata.institution_cn or metadata.institution_en,
+                metadata.country,
+                record.评论句原文,
+                record.标志词,
+                _format_evaluated_ref(record),
+                ep.第一作者,
+                ep.其他作者,
+                ep.文章名,
+                _format_evaluated_vol(record),
+                ep.期刊名称,
+                ep.年份,
+                _format_evaluated_vol_pages(record),
+                eval_institution,
+                eval_country,
+                "",
+                provider,
+                "",
+            ]
+
+            for col, value in enumerate(row_data, 1):
+                cell = ws.cell(row=global_row, column=col, value=value)
+                cell.font = cell_font
+                cell.border = thin_border
+                cell.alignment = wrap_alignment
+
+            global_row += 1
+            global_index += 1
+
+    # 调整列宽
+    col_widths = {
+        1: 6, 2: 40, 3: 12, 4: 25, 5: 30,
+        6: 30, 7: 15, 8: 8, 9: 18, 10: 25,
+        11: 10, 12: 50, 13: 12, 14: 40, 15: 12,
+        16: 25, 17: 30, 18: 30, 19: 15, 20: 8,
+        21: 18, 22: 25, 23: 10, 24: 30, 25: 20, 26: 15,
+    }
+    for col, width in col_widths.items():
+        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
+
+    wb.save(output_path)
+    total_records = global_index - 1
+    logger.info(f"合并 Excel 已保存: {output_path}（共 {total_records} 条记录）")
+    return output_path
