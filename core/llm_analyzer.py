@@ -164,4 +164,14 @@ def _api_call(config: LLMConfig, user_prompt: str) -> str:
 
     # 提取回复文本
     content = data["choices"][0]["message"]["content"]
+
+    # 记录 token 用量
+    usage = data.get("usage", {})
+    if usage:
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
+        logger.info(f"Token 用量: 输入={input_tokens:,}, 输出={output_tokens:,}, "
+                     f"合计={total_tokens:,}")
+
     return content
