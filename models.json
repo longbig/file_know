@@ -1,0 +1,42 @@
+{
+  "providers": [
+    {
+      "name": "timesniper",
+      "base_url": "https://timesniper.club",
+      "api_key": "sk-I8D47FrTRhSOknjY1fJLVvSoGtEemyqY49hIVZBUwjWd8uJ6",
+      "models": [
+        "claude-sonnet-4-6",
+        "claude-opus-4-6",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-pro-thinking",
+        "gemini-2.5-pro-thinking-128",
+        "gemini-2.5-pro-thinking-512",
+        "kimi-k2.5",
+        "kimi-k2.6-code-preview",
+        "gpt-5.4",
+        "gpt-5.2",
+        "glm-5",
+        "glm-5-turbo",
+        "glm-5.1",
+        "MiniMax-M2.7"
+      ]
+    },
+    {
+      "name": "xiaomi",
+      "base_url": "https://api.xiaomimimo.com",
+      "api_key": "sk-ceuij9nywz78oe51q8r1sy7axk9r465yvyxdmp2hpn7idj7d",
+      "auth_type": "api-key",
+      "max_tokens_field": "max_completion_tokens",
+      "extra_payload": {
+        "stream": false,
+        "thinking": {"type": "disabled"},
+        "response_format": {"type": "json_object"}
+      },
+      "models": [
+        "mimo-v2.5-pro"
+      ]
+    }
+  ],
+  "default_model": "claude-sonnet-4-6"
+}

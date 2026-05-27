@@ -74,7 +74,11 @@ class AnalysisResult(BaseModel):
 # ── API 调用 ──────────────────────────────────────────────────────
 
 def _clean_json_response(text: str) -> str:
-    """清理大模型返回的文本，提取 JSON 部分"""
+    """清理大模型返回的文本，提取第一个完整的 JSON 对象
+
+    使用大括号配对匹配，避免 LLM 返回多个 JSON 对象时
+    把它们拼在一起导致 trailing characters 解析错误。
+    """
     text = text.strip()
 
     # 移除可能的 markdown 代码块标记
@@ -88,17 +92,42 @@ def _clean_json_response(text: str) -> str:
             text = text[:-3]
         text = text.strip()
 
-    # 尝试找到 JSON 对象
+    # 找到第一个 { 的位置
     brace_start = text.find("{")
-    if brace_start > 0:
-        text = text[brace_start:]
+    if brace_start == -1:
+        return text
 
-    # 找到最后一个 }
+    # 大括号配对匹配，提取第一个完整的 JSON 对象
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(brace_start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            if in_string:
+                escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[brace_start:i + 1]
+
+    # 配对失败，回退到旧逻辑：第一个 { 到最后一个 }
     brace_end = text.rfind("}")
-    if brace_end != -1 and brace_end < len(text) - 1:
-        text = text[:brace_end + 1]
+    if brace_end != -1:
+        return text[brace_start:brace_end + 1]
 
-    return text
+    return text[brace_start:]
 
 
 def call_llm(
@@ -138,24 +167,34 @@ def call_llm(
 
 
 def _api_call(config: LLMConfig, user_prompt: str) -> str:
-    """调用 Claude API（兼容 OpenAI 格式的中转站）"""
-    # 中转站通常使用 OpenAI 兼容的 /v1/chat/completions 接口
+    """调用大模型 API（兼容 OpenAI 格式）"""
     url = f"{config.base_url.rstrip('/')}/v1/chat/completions"
 
-    headers = {
-        "Authorization": f"Bearer {config.api_key}",
-        "Content-Type": "application/json",
-    }
+    # 根据 auth_type 选择认证头
+    if config.auth_type == "api-key":
+        headers = {
+            "api-key": config.api_key,
+            "Content-Type": "application/json",
+        }
+    else:
+        headers = {
+            "Authorization": f"Bearer {config.api_key}",
+            "Content-Type": "application/json",
+        }
 
     payload = {
         "model": config.model,
         "temperature": config.temperature,
-        "max_tokens": 16384,
+        config.max_tokens_field: 16384,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
     }
+
+    # 合并供应商特有的额外参数（来自 models.json 的 extra_payload）
+    if config.extra_payload:
+        payload.update(config.extra_payload)
 
     with httpx.Client(timeout=300.0) as client:
         response = client.post(url, json=payload, headers=headers)

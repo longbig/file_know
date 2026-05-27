@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import AppConfig, LLMConfig
+from config import AppConfig, LLMConfig, get_all_models, get_default_model, get_model_provider
 from core.pipeline import process_paper
 from core.excel_writer import write_merged_excel
 
@@ -56,19 +56,45 @@ async def index():
         return f.read()
 
 
+# ────────────────── 模型列表 API ──────────────────
+
+@app.get("/api/models")
+async def list_models():
+    """返回 models.json 中所有可用模型及默认模型"""
+    models = get_all_models()
+    default = get_default_model()
+    # 为每个模型附带 provider 信息，方便前端自动填充
+    model_list = []
+    for m in models:
+        provider = get_model_provider(m)
+        model_list.append({
+            "name": m,
+            "provider": provider["name"] if provider else "",
+            "base_url": provider["base_url"] if provider else "",
+        })
+    return {"models": model_list, "default": default}
+
+
 # ────────────────── 单篇分析 ──────────────────
 
 @app.post("/api/analyze")
 async def analyze(
     pdf_file: UploadFile = File(...),
-    model: str = Form("claude-sonnet-4-6"),
+    model: str = Form(""),
     api_key: str = Form(""),
-    base_url: str = Form("https://timesniper.club"),
+    base_url: str = Form(""),
     provider: str = Form(""),
 ):
     """单篇 PDF 同步分析"""
-    effective_api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
-    if not effective_api_key:
+    # api_key / base_url 全部由 LLMConfig 根据模型名从 models.json 自动匹配
+    model = model or get_default_model()
+
+    config = AppConfig(
+        output_dir=OUTPUT_DIR,
+        llm=LLMConfig(model=model),
+    )
+
+    if not config.llm.api_key:
         return JSONResponse(status_code=400, content={"error": "请提供 API Key"})
 
     upload_dir = os.path.join(OUTPUT_DIR, "uploads")
@@ -76,11 +102,6 @@ async def analyze(
     pdf_path = os.path.join(upload_dir, pdf_file.filename)
     with open(pdf_path, "wb") as f:
         f.write(await pdf_file.read())
-
-    config = AppConfig(
-        output_dir=OUTPUT_DIR,
-        llm=LLMConfig(api_key=effective_api_key, base_url=base_url.rstrip("/"), model=model),
-    )
 
     try:
         result = process_paper(pdf_path=pdf_path, config=config, provider=provider)
@@ -95,15 +116,13 @@ async def analyze(
 @app.post("/api/batch")
 async def batch_analyze(
     folder_path: str = Form(...),
-    model: str = Form("claude-sonnet-4-6"),
+    model: str = Form(""),
     api_key: str = Form(""),
-    base_url: str = Form("https://timesniper.club"),
+    base_url: str = Form(""),
     provider: str = Form(""),
 ):
     """批量分析 - 读取本地文件夹中的所有 PDF"""
-    effective_api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
-    if not effective_api_key:
-        return JSONResponse(status_code=400, content={"error": "请提供 API Key"})
+    model = model or get_default_model()
 
     folder = os.path.abspath(folder_path.strip())
     if not os.path.isdir(folder):
@@ -131,8 +150,11 @@ async def batch_analyze(
 
     config = AppConfig(
         output_dir=OUTPUT_DIR,
-        llm=LLMConfig(api_key=effective_api_key, base_url=base_url.rstrip("/"), model=model),
+        llm=LLMConfig(model=model),
     )
+
+    if not config.llm.api_key:
+        return JSONResponse(status_code=400, content={"error": "请提供 API Key"})
 
     import asyncio
     loop = asyncio.get_event_loop()

@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import AppConfig, LLMConfig
+from config import AppConfig, LLMConfig, get_all_models, get_default_model, get_model_provider
 from core.pipeline import process_paper
 from core.excel_writer import write_merged_excel
 
@@ -98,9 +98,8 @@ def main():
     )
     parser.add_argument("input_dir", help="包含 PDF 文件的文件夹路径")
     parser.add_argument("--output", "-o", default="output", help="输出目录（默认: output）")
-    parser.add_argument("--model", "-m", default="claude-sonnet-4-6",
-                        choices=["claude-sonnet-4-6", "claude-opus-4-6"],
-                        help="使用的模型（默认: claude-sonnet-4-6）")
+    parser.add_argument("--model", "-m", default="",
+                        help=f"使用的模型（默认: {get_default_model()}，可选: {', '.join(get_all_models())}）")
     parser.add_argument("--api-key", default="", help="API Key（也可通过环境变量 ANTHROPIC_API_KEY 设置）")
     parser.add_argument("--base-url", default="", help="API Base URL（也可通过环境变量 ANTHROPIC_BASE_URL 设置）")
     parser.add_argument("--provider", "-p", default="", help="提供者信息（姓名/导师 学校 日期）")
@@ -123,9 +122,11 @@ def main():
     for i, f in enumerate(pdf_files, 1):
         logger.info(f"  {i}. {os.path.basename(f)}")
 
-    # 构建配置
-    api_key = args.api_key or os.getenv("ANTHROPIC_API_KEY", "")
-    base_url = args.base_url or os.getenv("ANTHROPIC_BASE_URL", "https://timesniper.club")
+    # 构建配置 —— 优先使用命令行参数，其次 models.json，最后环境变量
+    model = args.model or get_default_model()
+    model_provider = get_model_provider(model)
+    api_key = args.api_key or (model_provider["api_key"] if model_provider else "") or os.getenv("ANTHROPIC_API_KEY", "")
+    base_url = args.base_url or (model_provider["base_url"] if model_provider else "") or os.getenv("ANTHROPIC_BASE_URL", "https://timesniper.club")
 
     if not api_key:
         logger.error("未提供 API Key，请通过 --api-key 参数或 ANTHROPIC_API_KEY 环境变量设置")
@@ -139,7 +140,7 @@ def main():
         llm=LLMConfig(
             api_key=api_key,
             base_url=base_url.rstrip("/"),
-            model=args.model,
+            model=model,
         ),
     )
 

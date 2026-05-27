@@ -37,9 +37,6 @@
         .hidden { display: none; }
         .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .accordion { cursor: pointer; padding: 0.6rem; background: #f0f4ff; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.85rem; color: #4361ee; }
-        .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s; }
-        .accordion-content.open { max-height: 200px; }
         .progress { margin-top: 1rem; }
         .progress-bar { height: 6px; background: #e8ecf1; border-radius: 3px; overflow: hidden; }
         .progress-fill { height: 100%; background: #4361ee; border-radius: 3px; transition: width 0.5s; width: 0%; }
@@ -100,40 +97,12 @@
                 <div class="form-group">
                     <label>选择模型</label>
                     <select id="model">
-                        <option value="claude-sonnet-4-6">claude-sonnet-4-6 (默认)</option>
-                        <option value="claude-opus-4-6">claude-opus-4-6</option>
-
-                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-                        <option value="gemini-2.5-pro-thinking">gemini-2.5-pro-thinking</option>
-                        <option value="gemini-2.5-pro-thinking-128">gemini-2.5-pro-thinking-128</option>
-                        <option value="gemini-2.5-pro-thinking-512">gemini-2.5-pro-thinking-512</option>
-                        <option value="kimi-k2.5">kimi-k2.5</option>
-                        <option value="kimi-k2.6-code-preview">kimi-k2.6-code-preview</option>
-                        <option value="gpt-5.4">gpt-5.4</option>
-                        <option value="gpt-5.2">gpt-5.2</option>
-                        <option value="glm-5">glm-5</option>
-                        <option value="glm-5-turbo">glm-5-turbo</option>
-                        <option value="glm-5.1">glm-5.1</option>
-                        <option value="MiniMax-M2.7">MiniMax-M2.7</option>
+                        <option value="">加载中...</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label>提供者信息</label>
                     <input type="text" id="provider" placeholder="姓名/导师 学校 日期">
-                </div>
-            </div>
-            <div class="accordion" onclick="toggleAccordion()">API 连接设置 (点击展开)</div>
-            <div class="accordion-content" id="apiSettings">
-                <div class="form-row" style="padding: 0.5rem 0;">
-                    <div class="form-group">
-                        <label>API Key</label>
-                        <input type="password" id="apiKey" placeholder="输入你的 API Key">
-                    </div>
-                    <div class="form-group">
-                        <label>API Base URL</label>
-                        <input type="text" id="baseUrl" value="https://timesniper.club">
-                    </div>
                 </div>
             </div>
         </div>
@@ -199,6 +168,47 @@
     </div>
 
     <script>
+        // ──────── 动态加载模型列表 ────────
+        let modelProviderMap = {};  // model_name -> { provider, base_url }
+
+        async function loadModels() {
+            try {
+                const resp = await fetch('/api/models');
+                const data = await resp.json();
+                const select = document.getElementById('model');
+                select.innerHTML = '';
+
+                // 按 provider 分组
+                const groups = {};
+                data.models.forEach(m => {
+                    const group = m.provider || 'other';
+                    if (!groups[group]) groups[group] = [];
+                    groups[group].push(m);
+                    modelProviderMap[m.name] = { provider: m.provider, base_url: m.base_url };
+                });
+
+                Object.entries(groups).forEach(([groupName, models]) => {
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = groupName;
+                    models.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m.name;
+                        opt.textContent = m.name + (m.name === data.default ? ' (默认)' : '');
+                        if (m.name === data.default) opt.selected = true;
+                        optgroup.appendChild(opt);
+                    });
+                    select.appendChild(optgroup);
+                });
+
+                // 初始化完成
+            } catch (e) {
+                console.error('加载模型列表失败:', e);
+            }
+        }
+
+        // 页面加载时获取模型列表
+        loadModels();
+
         // ──────── Tab 切换 ────────
         function switchTab(tab) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -207,15 +217,9 @@
             document.querySelectorAll('.tab')[tab === 'single' ? 0 : 1].classList.add('active');
         }
 
-        function toggleAccordion() {
-            document.getElementById('apiSettings').classList.toggle('open');
-        }
-
         function getCommonParams() {
             return {
                 model: document.getElementById('model').value,
-                api_key: document.getElementById('apiKey').value,
-                base_url: document.getElementById('baseUrl').value,
                 provider: document.getElementById('provider').value,
             };
         }
@@ -264,8 +268,6 @@
             const formData = new FormData();
             formData.append('pdf_file', file);
             formData.append('model', params.model);
-            formData.append('api_key', params.api_key);
-            formData.append('base_url', params.base_url);
             formData.append('provider', params.provider);
 
             try {
@@ -339,8 +341,6 @@
             const formData = new FormData();
             formData.append('folder_path', folder);
             formData.append('model', params.model);
-            formData.append('api_key', params.api_key);
-            formData.append('base_url', params.base_url);
             formData.append('provider', params.provider);
 
             try {
