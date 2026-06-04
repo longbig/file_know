@@ -16,6 +16,7 @@ from docx.shared import Cm, Pt, RGBColor, Twips
 
 from core.llm_analyzer import CommentRecord
 from core.pdf_parser import PaperMetadata
+from core.excel_writer import _format_author_abbrev, _format_authors_abbrev
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,14 @@ def _clean_marker(marker: str) -> str:
     return cleaned.strip()
 
 
+def _clean_text_xml(text: str) -> str:
+    """清理文本中的 XML 不兼容字符（控制字符等）"""
+    if not text:
+        return text
+    # 移除所有 ASCII 控制字符（0x00-0x1F），除了换行(0x0A)、回车(0x0D)、制表符(0x09)
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+
+
 def _add_run(paragraph, text: str, bold: bool = False,
              font_name: str = "Times New Roman", font_size: float = 12,
              east_asia_font: str = "宋体"):
@@ -119,7 +128,7 @@ def _add_run(paragraph, text: str, bold: bool = False,
 
     默认字体：西文 Times New Roman / 中文 宋体 / 12pt（匹配模板）
     """
-    run = paragraph.add_run(text)
+    run = paragraph.add_run(_clean_text_xml(text))
     run.font.name = font_name
     run.font.size = Pt(font_size)
     run.bold = bold
@@ -212,9 +221,12 @@ def _write_cell(cell, text: str, bold=False, font_size: float = 12):
 
 
 def _format_ref_for_word(record: CommentRecord) -> str:
-    """格式化被评文献引用（Word 登记表格式）"""
+    """格式化被评文献引用（Word 登记表格式，GB/T 7714 缩写）"""
     ep = record.被评文献
-    authors = ", ".join(ep.全部作者列表) if ep.全部作者列表 else ep.第一作者
+    if ep.全部作者列表:
+        authors = _format_authors_abbrev(ep.全部作者列表)
+    else:
+        authors = _format_author_abbrev(ep.第一作者)
     parts = [authors]
     if ep.文章名:
         parts[0] += f". {ep.文章名}[J]."

@@ -1,8 +1,8 @@
 """大模型分析模块
 
 职责：
-- 调用 Claude API（通过中转站）分析论文全文
-- 提取学术评论句
+- 调用 LLM API（通过中转站）分析论文全文（旧架构）
+- 批量语义判定候选评论句（新架构）
 - JSON Schema 校验 + 自动重试
 """
 
@@ -14,7 +14,13 @@ import httpx
 from pydantic import BaseModel, field_validator
 
 from config import LLMConfig
-from core.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from core.prompts import (
+    SYSTEM_PROMPT,
+    USER_PROMPT_TEMPLATE,
+    SEMANTIC_JUDGE_PROMPT,
+    JUDGE_USER_TEMPLATE,
+    format_candidate_for_judge,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +217,184 @@ def _api_call(config: LLMConfig, user_prompt: str) -> str:
         output_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
         logger.info(f"Token 用量: 输入={input_tokens:,}, 输出={output_tokens:,}, "
+                     f"合计={total_tokens:,}")
+
+    return content
+
+
+# ── 新架构：批量语义判定 ─────────────────────────────────────────
+
+class JudgeEvaluatedPaper(BaseModel):
+    """LLM 语义判定返回的被评文献信息"""
+    全部作者列表: list[str] = []
+    第一作者: str = ""
+    其他作者: str = ""
+    文章名: str = ""
+    期刊名称: str = ""
+    年份: str = ""
+    卷: str = ""
+    期: str = ""
+    起止页码: str = ""
+    第一作者机构: str = ""
+    第一作者国家: str = ""
+
+
+class JudgeResult(BaseModel):
+    """单条候选句的语义判定结果"""
+    id: int
+    accept: bool
+    reason: str = ""
+    evaluated_paper: JudgeEvaluatedPaper | None = None
+
+
+class JudgeResponse(BaseModel):
+    """LLM 语义判定的完整响应"""
+    results: list[JudgeResult] = []
+
+
+def judge_candidates(
+    candidates: list,  # list[CandidateRecord]
+    config: LLMConfig,
+    self_authors_str: str = "",
+    batch_size: int = 20,
+    progress_callback=None,
+) -> list[JudgeResult]:
+    """批量语义判定候选评论句
+
+    将候选句分批发送给 LLM，由 LLM 做语义层面的最终判定。
+    每批约 20 条，避免单次请求过大。
+
+    Args:
+        candidates: 候选评论句列表（CandidateRecord）
+        config: LLM 配置
+        self_authors_str: 施评文献作者列表字符串（用于 LLM 判断自引）
+        batch_size: 每批发送的候选句数量
+        progress_callback: 进度回调
+
+    Returns:
+        所有候选句的判定结果列表
+    """
+    if not candidates:
+        return []
+
+    all_results = []
+
+    # 分批处理
+    for batch_start in range(0, len(candidates), batch_size):
+        batch = candidates[batch_start:batch_start + batch_size]
+        batch_end = min(batch_start + batch_size, len(candidates))
+
+        if progress_callback:
+            progress_callback(
+                f"语义判定中... ({batch_start + 1}-{batch_end}/{len(candidates)})"
+            )
+
+        # 格式化候选句文本
+        candidate_texts = []
+        for i, c in enumerate(batch):
+            # 构建参考文献信息
+            ref_info = ""
+            if c.matched_ref:
+                ref = c.matched_ref
+                ref_info = f"[{ref.index}] {ref.raw_text[:200]}"
+
+            text = format_candidate_for_judge(
+                candidate_id=batch_start + i + 1,
+                sentence_text=c.sentence_text,
+                marker=c.marker,
+                author_name=c.author_name,
+                year=c.year,
+                prev_sentence=c.prev_sentence,
+                next_sentence=c.next_sentence,
+                ref_info=ref_info,
+            )
+            candidate_texts.append(text)
+
+        user_prompt = JUDGE_USER_TEMPLATE.format(
+            count=len(batch),
+            self_authors=self_authors_str or "未知",
+            candidates_text="\n\n".join(candidate_texts),
+        )
+
+        try:
+            response_text = _api_call_with_system(
+                config, SEMANTIC_JUDGE_PROMPT, user_prompt
+            )
+            cleaned = _clean_json_response(response_text)
+            judge_resp = JudgeResponse.model_validate_json(cleaned)
+
+            # 补全缺失的结果（LLM 可能遗漏某些候选句）
+            result_map = {r.id: r for r in judge_resp.results}
+            for i, c in enumerate(batch):
+                cid = batch_start + i + 1
+                if cid in result_map:
+                    all_results.append(result_map[cid])
+                else:
+                    # LLM 未返回的候选句默认 accept（保守策略，避免漏提）
+                    logger.warning(f"LLM 未返回候选句 #{cid} 的判定结果，默认 accept")
+                    all_results.append(JudgeResult(id=cid, accept=True, reason="LLM 未返回结果"))
+
+        except Exception as e:
+            logger.error(f"语义判定批次 {batch_start + 1}-{batch_end} 失败: {e}")
+            # 批次失败时全部默认 accept（保守策略）
+            for i in range(len(batch)):
+                cid = batch_start + i + 1
+                all_results.append(
+                    JudgeResult(id=cid, accept=True, reason=f"判定失败: {e}")
+                )
+
+    accepted = sum(1 for r in all_results if r.accept)
+    rejected = sum(1 for r in all_results if not r.accept)
+    logger.info(f"语义判定完成: {accepted} 条通过, {rejected} 条否决")
+
+    return all_results
+
+
+def _api_call_with_system(
+    config: LLMConfig, system_prompt: str, user_prompt: str
+) -> str:
+    """调用大模型 API（可自定义 system prompt）"""
+    url = f"{config.base_url.rstrip('/')}/v1/chat/completions"
+
+    # 根据 auth_type 选择认证头
+    if config.auth_type == "api-key":
+        headers = {
+            "api-key": config.api_key,
+            "Content-Type": "application/json",
+        }
+    else:
+        headers = {
+            "Authorization": f"Bearer {config.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    payload = {
+        "model": config.model,
+        "temperature": config.temperature,
+        config.max_tokens_field: 16384,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+
+    # 合并供应商特有的额外参数
+    if config.extra_payload:
+        payload.update(config.extra_payload)
+
+    with httpx.Client(timeout=300.0) as client:
+        response = client.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+    content = data["choices"][0]["message"]["content"]
+
+    usage = data.get("usage", {})
+    if usage:
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
+        logger.info(f"[语义判定] Token 用量: 输入={input_tokens:,}, 输出={output_tokens:,}, "
                      f"合计={total_tokens:,}")
 
     return content

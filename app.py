@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import AppConfig, LLMConfig, get_all_models, get_default_model, get_model_provider
 from core.pipeline import process_paper
 from core.excel_writer import write_merged_excel
+from core.html_reporter import write_batch_report
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(BASE_DIR, "logs")
@@ -184,11 +185,13 @@ def _run_batch(task_id: str, pdf_files: list[str], config: AppConfig, provider: 
             out_dir = os.path.join(config.output_dir, pdf_name)
 
             # 打包
+            filter_log_path = os.path.join(out_dir, f"{pdf_name}_过滤日志.txt")
             if record_count > 0:
                 zip_path = os.path.join(out_dir, f"{pdf_name}_全部结果.zip")
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                     for p in ([result.get("highlighted_pdf_path", ""),
-                               result.get("excel_path", "")]
+                               result.get("excel_path", ""),
+                               filter_log_path]
                               + result.get("word_paths", [])):
                         if p and os.path.exists(p):
                             zf.write(p, os.path.basename(p))
@@ -209,6 +212,8 @@ def _run_batch(task_id: str, pdf_files: list[str], config: AppConfig, provider: 
                 "status": "成功" if record_count > 0 else "无结果",
                 "output_dir": out_dir if record_count > 0 else "",
                 "zip_path": zip_path,
+                "records": result["records"],
+                "metadata": result["metadata"],
             })
 
         except Exception as e:
@@ -232,10 +237,20 @@ def _run_batch(task_id: str, pdf_files: list[str], config: AppConfig, provider: 
             logger.error(f"生成合并 Excel 失败: {e}")
             merged_excel_path = ""
 
+    # 生成 HTML 报告
+    html_path = os.path.join(config.output_dir, "批量结果报告.html")
+    try:
+        write_batch_report(html_path, tasks[task_id]["results"], config.output_dir)
+        logger.info(f"HTML 报告已保存: {html_path}")
+    except Exception as e:
+        logger.error(f"生成 HTML 报告失败: {e}")
+        html_path = ""
+
     tasks[task_id]["done"] = True
     tasks[task_id]["current_file"] = ""
     tasks[task_id]["current_step"] = "全部完成"
     tasks[task_id]["merged_excel_path"] = merged_excel_path
+    tasks[task_id]["html_report_path"] = html_path
 
 
 def _update_step(task_id: str, msg: str):
@@ -276,6 +291,7 @@ def _build_single_response(result: dict, pdf_path: str) -> dict:
         out_dir = os.path.join(OUTPUT_DIR, pdf_name)
         output_dir = out_dir
 
+        os.makedirs(out_dir, exist_ok=True)
         zip_path = os.path.join(out_dir, f"{pdf_name}_全部结果.zip")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for p in ([result.get("highlighted_pdf_path", ""),

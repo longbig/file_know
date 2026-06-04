@@ -84,7 +84,7 @@ def lookup_by_doi(doi: str) -> dict:
             target_author = authors[0]
             affiliations = target_author.get("affiliation", [])
             if affiliations:
-                aff_name = affiliations[0].get("name", "")
+                aff_name = affiliations[0].get("name", "").rstrip(".")
                 result["institution"] = aff_name
                 result["country"] = _infer_country(aff_name)
 
@@ -185,7 +185,7 @@ def lookup_institution(
 
             affiliations = target_author.get("affiliation", [])
             if affiliations:
-                aff_name = affiliations[0].get("name", "")
+                aff_name = affiliations[0].get("name", "").rstrip(".")
                 result["institution"] = aff_name
                 # 从机构名推断国家
                 result["country"] = _infer_country(aff_name)
@@ -296,3 +296,124 @@ def batch_lookup(
         results.append(info)
 
     return results
+
+
+def lookup_full_metadata(
+    doi: str = "",
+    title: str = "",
+    year: str = "",
+    first_author: str = "",
+) -> dict:
+    """从 CrossRef 获取论文的完整元数据
+
+    用于补全参考文献中 et al. 截断的作者列表、缺失的期号等。
+
+    三级回退：DOI 精确查询 → 标题搜索 → 返回空
+
+    Args:
+        doi: DOI 标识符
+        title: 论文标题
+        year: 发表年份
+        first_author: 第一作者（用于匹配校验）
+
+    Returns:
+        dict with keys:
+            - authors: list[str] - 完整作者列表（"Family Given" 格式）
+            - issue: str - 期号
+            - volume: str - 卷号
+            - pages: str - 页码
+            - institution: str - 第一作者机构
+            - country: str - 国家
+            - doi: str
+    """
+    empty = {
+        "authors": [], "title": "", "issue": "", "volume": "", "pages": "",
+        "institution": "", "country": "", "doi": "",
+    }
+
+    item = None
+
+    # 策略1：DOI 精确查询
+    if doi:
+        try:
+            url = f"{CROSSREF_API}/{doi}"
+            params = {"mailto": MAILTO}
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(url, params=params)
+                resp.raise_for_status()
+                item = resp.json().get("message", {})
+        except Exception as e:
+            logger.warning(f"CrossRef DOI 查询失败: {e}")
+
+    # 策略2：标题搜索
+    if not item and title:
+        try:
+            params = {
+                "query.title": _normalize_title(title),
+                "rows": 3,
+                "mailto": MAILTO,
+            }
+            if year:
+                params["filter"] = f"from-pub-date:{year},until-pub-date:{year}"
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(CROSSREF_API, params=params)
+                resp.raise_for_status()
+                items = resp.json().get("message", {}).get("items", [])
+            if items:
+                best = items[0]
+                best_title = " ".join(best.get("title", []))
+                if _title_similarity(title, best_title) >= 0.3:
+                    item = best
+        except Exception as e:
+            logger.warning(f"CrossRef 标题搜索失败: {e}")
+
+    if not item:
+        return empty
+
+    result = dict(empty)
+    result["doi"] = item.get("DOI", doi)
+
+    # 提取标题
+    cr_titles = item.get("title", [])
+    if cr_titles:
+        result["title"] = cr_titles[0]
+
+    # 提取完整作者列表
+    cr_authors = item.get("author", [])
+    if cr_authors:
+        author_names = []
+        for a in cr_authors:
+            family = a.get("family", "")
+            given = a.get("given", "")
+            if family and given:
+                author_names.append(f"{family}, {given}")
+            elif family:
+                author_names.append(family)
+        result["authors"] = author_names
+
+        # 第一作者机构
+        target = cr_authors[0]
+        if first_author:
+            for a in cr_authors:
+                family = a.get("family", "")
+                if first_author.lower() in family.lower() or family.lower() in first_author.lower():
+                    target = a
+                    break
+        affiliations = target.get("affiliation", [])
+        if affiliations:
+            aff = affiliations[0].get("name", "").rstrip(".")
+            result["institution"] = aff
+            result["country"] = _infer_country(aff)
+
+    # 期号、卷号、页码
+    result["issue"] = item.get("issue", "")
+    result["volume"] = item.get("volume", "")
+    pages = item.get("page", "")
+    result["pages"] = pages
+
+    logger.info(
+        f"CrossRef 元数据: {len(result['authors'])} 位作者, "
+        f"issue={result['issue']!r}, volume={result['volume']!r}"
+    )
+
+    return result

@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import AppConfig, LLMConfig, get_all_models, get_default_model, get_model_provider
 from core.pipeline import process_paper
 from core.excel_writer import write_merged_excel
+from core.html_reporter import write_batch_report
 
 logging.basicConfig(
     level=logging.INFO,
@@ -157,6 +158,11 @@ def main():
         merged_excel_path = os.path.join(output_dir, "合并汇总表.xlsx")
         write_merged_excel(merged_excel_path, paper_data_list)
         logger.info(f"合并 Excel 已保存: {merged_excel_path}")
+
+    # 生成 HTML 报告
+    html_path = os.path.join(output_dir, "批量结果报告.html")
+    write_batch_report(html_path, results, output_dir)
+    logger.info(f"HTML 报告已保存: {html_path}")
 
     # 汇总报告
     logger.info(f"\n{'='*60}")
