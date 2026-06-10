@@ -35,6 +35,9 @@ def write_batch_report(output_path: str, results: list[dict], output_dir: str = 
         status = r["status"]
         count = r.get("count", 0)
 
+        error_detail = r.get("error_detail", "")
+        error_msg = r.get("error", "")
+
         if status == "成功":
             status_badge = f'<span class="badge ok">成功</span>'
         elif status == "无结果":
@@ -56,10 +59,16 @@ def write_batch_report(output_path: str, results: list[dict], output_dir: str = 
                     f'</li>'
                 )
             detail_rows = f'<ul class="sentences">{"".join(sentence_items)}</ul>'
+        elif error_detail:
+            detail_rows = (
+                f'<div class="error-summary">{_esc(error_msg)}</div>'
+                f'<pre class="error-trace">{_esc(error_detail)}</pre>'
+            )
 
         toggle_id = f"detail_{i}"
         detail_block = ""
-        if records:
+        has_detail = bool(records or error_detail)
+        if has_detail:
             detail_block = (
                 f'<tr class="detail-row" id="{toggle_id}" style="display:none">'
                 f'<td colspan="4">{detail_rows}</td></tr>'
@@ -120,6 +129,9 @@ def write_batch_report(output_path: str, results: list[dict], output_dir: str = 
              padding: 1px 5px; font-size: 12px; }}
   .author {{ color: #7c3aed; font-weight: 600; }}
   .detail-row td {{ background: #fafafa; }}
+  .error-summary {{ color: #b91c1c; font-weight: 600; margin-bottom: 6px; }}
+  .error-trace {{ background: #1e1e1e; color: #f8d7da; font-size: 12px; padding: 10px;
+                 border-radius: 4px; overflow-x: auto; white-space: pre-wrap; margin: 0; }}
 </style>
 </head>
 <body>

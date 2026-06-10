@@ -41,8 +41,10 @@ from core.llm_analyzer import (
     ReviewingPaper,
     call_llm,
     judge_candidates,
+    verify_records,
 )
-from core.pdf_parser import PaperMetadata, parse_pdf
+from core.pdf_parser import PaperMetadata
+from core.mineru_parser import parse_pdf
 from core.ref_parser import parse_references, find_reference_by_author_year
 from core.sentence_splitter import split_sentences
 from core.rule_engine import extract_candidates, normalize_authors
@@ -87,9 +89,9 @@ def process_paper(
         if progress_callback:
             progress_callback(msg)
 
-    # 准备输出目录
+    # 准备输出目录（预创建在"有结果"子目录，若无结果再移到"无结果"）
     pdf_name = Path(pdf_path).stem
-    output_dir = os.path.join(config.output_dir, pdf_name)
+    output_dir = os.path.join(config.output_dir, "有结果", pdf_name)
     os.makedirs(output_dir, exist_ok=True)
 
     # ══════════════════════════════════════════════════════════
@@ -99,7 +101,7 @@ def process_paper(
 
     # 1.1 PDF 解析
     _log("  [1.1] 解析 PDF 文件...")
-    parse_result = parse_pdf(pdf_path)
+    parse_result = parse_pdf(pdf_path, output_dir=output_dir)
     metadata = parse_result.metadata
     _log(f"  - 提取 {parse_result.page_count} 页文本")
     _log(f"  - 施评文献: {metadata.first_author}, {metadata.title_cn or metadata.title_en}")
@@ -145,7 +147,7 @@ def process_paper(
         _log("规则引擎未找到候选评论句，流程结束。")
         filter_log_path = os.path.join(output_dir, f"{pdf_name}_过滤日志.txt")
         _write_filter_log(filter_log_path, pdf_name, filter_log, len(sentences), [], [])
-        output_dir = _move_to_category(output_dir, config.output_dir, pdf_name, has_result=False)
+        _move_to_no_result(output_dir, config.output_dir, pdf_name)
         return _empty_result(metadata, log)
 
     # ══════════════════════════════════════════════════════════
@@ -179,7 +181,7 @@ def process_paper(
         _log("语义判定后无通过的评论句，流程结束。")
         filter_log_path = os.path.join(output_dir, f"{pdf_name}_过滤日志.txt")
         _write_filter_log(filter_log_path, pdf_name, filter_log, len(sentences), candidates, judge_results)
-        output_dir = _move_to_category(output_dir, config.output_dir, pdf_name, has_result=False)
+        _move_to_no_result(output_dir, config.output_dir, pdf_name)
         return _empty_result(metadata, log)
 
     # ══════════════════════════════════════════════════════════
@@ -272,6 +274,24 @@ def process_paper(
     _write_filter_log(filter_log_path, pdf_name, filter_log, len(sentences), candidates, judge_results)
 
     # ══════════════════════════════════════════════════════════
+    # 复检：验证评论句确实存在于原文中
+    # ══════════════════════════════════════════════════════════
+    _log(f"  [4.4] 原文复检（当前 {len(records)} 条）...")
+    records = verify_records(
+        records=records,
+        full_text=parse_result.full_text,
+        config=config.llm,
+        progress_callback=lambda msg: _log(f"  - {msg}"),
+    )
+    institution_results = institution_results[:len(records)]
+    _log(f"  - 复检后剩余 {len(records)} 条")
+
+    if not records:
+        _log("复检后无有效评论句，流程结束。")
+        _move_to_no_result(output_dir, config.output_dir, pdf_name)
+        return _empty_result(metadata, log)
+
+    # ══════════════════════════════════════════════════════════
     # 阶段 5：输出生成
     # ══════════════════════════════════════════════════════════
     _log("阶段 5/5: 生成输出文件...")
@@ -306,14 +326,6 @@ def process_paper(
 
     _log(f"处理完成！共 {len(records)} 条评论句，结果保存在: {output_dir}")
 
-    # 将输出目录移动到"有结果"分类子目录
-    new_output_dir = _move_to_category(output_dir, config.output_dir, pdf_name, has_result=True)
-    # 更新文件路径
-    if new_output_dir != output_dir:
-        excel_path = excel_path.replace(output_dir, new_output_dir)
-        highlighted_pdf_path = highlighted_pdf_path.replace(output_dir, new_output_dir)
-        word_paths = [p.replace(output_dir, new_output_dir) for p in word_paths]
-
     return {
         "records": records,
         "excel_path": excel_path,
@@ -325,16 +337,14 @@ def process_paper(
     }
 
 
-def _move_to_category(output_dir: str, base_output_dir: str, pdf_name: str, has_result: bool) -> str:
-    """将输出目录移动到"有结果"或"无结果"子目录"""
-    category = "有结果" if has_result else "无结果"
-    dest_parent = os.path.join(base_output_dir, category)
+def _move_to_no_result(output_dir: str, base_output_dir: str, pdf_name: str) -> None:
+    """将输出目录移动到"无结果"子目录"""
+    dest_parent = os.path.join(base_output_dir, "无结果")
     os.makedirs(dest_parent, exist_ok=True)
     dest = os.path.join(dest_parent, pdf_name)
     if os.path.exists(dest):
         shutil.rmtree(dest)
     shutil.move(output_dir, dest)
-    return dest
 
 
 def _empty_result(metadata: PaperMetadata, log: list[str]) -> dict:

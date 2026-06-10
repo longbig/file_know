@@ -19,6 +19,8 @@ from core.prompts import (
     USER_PROMPT_TEMPLATE,
     SEMANTIC_JUDGE_PROMPT,
     JUDGE_USER_TEMPLATE,
+    VERIFY_PROMPT,
+    VERIFY_USER_TEMPLATE,
     format_candidate_for_judge,
 )
 
@@ -398,3 +400,54 @@ def _api_call_with_system(
                      f"合计={total_tokens:,}")
 
     return content
+
+
+def verify_records(
+    records: list[CommentRecord],
+    full_text: str,
+    config: LLMConfig,
+    batch_size: int = 10,
+    progress_callback=None,
+) -> list[CommentRecord]:
+    """对已组装的评论句做原文复检，过滤掉在原文中找不到的记录"""
+    if not records:
+        return records
+
+    context = full_text[:8000]
+    verified_records = []
+
+    for batch_start in range(0, len(records), batch_size):
+        batch = records[batch_start:batch_start + batch_size]
+        if progress_callback:
+            progress_callback(f"复检中... ({batch_start + 1}-{min(batch_start + batch_size, len(records))}/{len(records)})")
+
+        candidates_text = "\n".join(
+            f"[{batch_start + i + 1}] {r.评论句原文[:300]}"
+            for i, r in enumerate(batch)
+        )
+        user_prompt = VERIFY_USER_TEMPLATE.format(
+            count=len(batch),
+            context=context,
+            candidates_text=candidates_text,
+        )
+
+        try:
+            response_text = _api_call_with_system(config, VERIFY_PROMPT, user_prompt)
+            cleaned = _clean_json_response(response_text)
+            data = json.loads(cleaned)
+            result_map = {r["id"]: r.get("verified", True) for r in data.get("results", [])}
+            for i, record in enumerate(batch):
+                cid = batch_start + i + 1
+                if result_map.get(cid, True):
+                    verified_records.append(record)
+                else:
+                    reason = next((r.get("reason", "") for r in data.get("results", []) if r["id"] == cid), "")
+                    logger.info(f"复检剔除 #{cid}: {reason}")
+        except Exception as e:
+            logger.warning(f"复检批次 {batch_start + 1} 失败，保留全部: {e}")
+            verified_records.extend(batch)
+
+    removed = len(records) - len(verified_records)
+    if removed > 0:
+        logger.info(f"复检完成：剔除 {removed} 条，保留 {len(verified_records)} 条")
+    return verified_records

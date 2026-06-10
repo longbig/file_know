@@ -62,8 +62,8 @@ def process_single(pdf_path: str, config: AppConfig, provider: str, index: int, 
             logger.warning(f"  未找到学术评论句，跳过文件生成")
             return {"name": pdf_name, "count": 0, "status": "无结果", "paper_data": None}
 
-        # 打包 zip
-        out_dir = os.path.join(config.output_dir, pdf_name)
+        # 打包 zip（使用 pipeline 实际输出目录）
+        out_dir = os.path.dirname(result.get("excel_path", ""))
         zip_path = os.path.join(out_dir, f"{pdf_name}_全部结果.zip")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for path in (
@@ -87,8 +87,10 @@ def process_single(pdf_path: str, config: AppConfig, provider: str, index: int, 
         return {"name": pdf_name, "count": record_count, "status": "成功", "paper_data": paper_data}
 
     except Exception as e:
-        logger.error(f"  处理失败: {e}")
-        return {"name": pdf_name, "count": 0, "status": f"失败: {e}", "paper_data": None}
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"  处理失败: {e}\n{error_detail}")
+        return {"name": pdf_name, "count": 0, "status": "失败", "error": str(e), "error_detail": error_detail, "paper_data": None}
 
 
 def main():

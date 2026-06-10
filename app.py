@@ -182,16 +182,19 @@ def _run_batch(task_id: str, pdf_files: list[str], config: AppConfig, provider: 
             )
 
             record_count = len(result["records"])
-            out_dir = os.path.join(config.output_dir, pdf_name)
+            # 使用 pipeline 实际输出目录（已在有结果/无结果子目录中）
+            out_dir = os.path.dirname(result.get("excel_path") or "") if result.get("excel_path") else os.path.join(config.output_dir, pdf_name)
 
             # 打包
             filter_log_path = os.path.join(out_dir, f"{pdf_name}_过滤日志.txt")
             if record_count > 0:
                 zip_path = os.path.join(out_dir, f"{pdf_name}_全部结果.zip")
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                    md_path = os.path.join(out_dir, f"{pdf_name}.md")
                     for p in ([result.get("highlighted_pdf_path", ""),
                                result.get("excel_path", ""),
-                               filter_log_path]
+                               filter_log_path,
+                               md_path]
                               + result.get("word_paths", [])):
                         if p and os.path.exists(p):
                             zf.write(p, os.path.basename(p))
@@ -288,14 +291,15 @@ def _build_single_response(result: dict, pdf_path: str) -> dict:
 
     if result["records"]:
         pdf_name = Path(pdf_path).stem
-        out_dir = os.path.join(OUTPUT_DIR, pdf_name)
+        out_dir = os.path.dirname(result.get("excel_path", ""))
         output_dir = out_dir
 
-        os.makedirs(out_dir, exist_ok=True)
         zip_path = os.path.join(out_dir, f"{pdf_name}_全部结果.zip")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            md_path = os.path.join(out_dir, f"{pdf_name}.md")
             for p in ([result.get("highlighted_pdf_path", ""),
-                       result.get("excel_path", "")]
+                       result.get("excel_path", ""),
+                       md_path]
                       + result.get("word_paths", [])):
                 if p and os.path.exists(p):
                     zf.write(p, os.path.basename(p))

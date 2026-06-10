@@ -212,3 +212,6 @@ logs/
 .DS_Store
 【输入*
 【输出*
+venv312/
+english/
+oracle_parse_json.sql

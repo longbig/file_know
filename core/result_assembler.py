@@ -101,6 +101,18 @@ def assemble_results(
         record = _build_comment_record(candidate, references, judge)
         comment_records.append(record)
 
+    # 去重：按 (评论句原文规范化, 第一作者, 年份) 三元组去重
+    seen = set()
+    deduped = []
+    for r in comment_records:
+        key = (re.sub(r'\s+', ' ', r.评论句原文).strip(), r.被评文献.第一作者, r.被评文献.年份)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(r)
+    if len(deduped) < len(comment_records):
+        logger.info(f"去重：{len(comment_records)} → {len(deduped)} 条")
+    comment_records = deduped
+
     logger.info(f"结果组装完成：{len(comment_records)} 条评论句记录")
 
     return AnalysisResult(
