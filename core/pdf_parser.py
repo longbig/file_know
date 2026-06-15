@@ -353,6 +353,18 @@ def _extract_metadata_en(full_text: str, doc: fitz.Document, first_page: str) ->
         # 或从 header 区域提取
         _extract_journal_from_header(doc, meta)
 
+    # 格式3（兜底）: "Journal Volume (Year) ArticleNumber"，如 "Heliyon 7 (2021) e06955"
+    if not meta.journal_en:
+        m = re.search(
+            r'^([A-Z][A-Za-z\s]+?)\s+(\d+)\s*\((\d{4})\)\s*([a-zA-Z]\d+)',
+            first_page, re.MULTILINE,
+        )
+        if m:
+            meta.journal_en = m.group(1).strip()
+            meta.volume = m.group(2)
+            meta.year = meta.year or m.group(3)
+            meta.pages = m.group(4)
+
     # ── 3. 提取标题（从 PDF 块结构中找最大字号的文本块）──
     _extract_title_from_blocks(doc, meta)
 
@@ -409,6 +421,23 @@ def _extract_journal_from_header(doc: fitz.Document, meta: PaperMetadata):
                     meta.volume = m.group(3)
                 if not meta.pages:
                     meta.pages = m.group(4).replace('\u2013', '-').replace('–', '-')
+                return
+
+            # Current Biology / Elsevier 格式（先检查，防止 m2 误匹配月份名）:
+            # "Current Biology 31, R1252–R1266, October 11, 2021"
+            m3 = re.search(
+                r'([A-Z][A-Za-z\s]+?)\s+(\d+),\s*([A-Z]?\d+[\u2013\-–][A-Z]?\d+).*?(\d{4})',
+                block_text,
+            )
+            if m3:
+                if not meta.journal_en:
+                    meta.journal_en = m3.group(1).strip()
+                if not meta.volume:
+                    meta.volume = m3.group(2)
+                if not meta.pages:
+                    meta.pages = m3.group(3).replace('\u2013', '-').replace('–', '-')
+                if not meta.year:
+                    meta.year = m3.group(4)
                 return
 
             # iScience/Cell 变体: "He & Lamont, iScience 25,\n104642\nJuly 15, 2022"
@@ -510,7 +539,7 @@ def _extract_title_from_blocks(doc: fitz.Document, meta: PaperMetadata):
     title_text = candidates[0][1]
     # 去掉开头的文章类型标签（如 "Article ", "Review Article "）
     title_text = re.sub(
-        r'^(?:Article|Review\s+Article|Research\s+Article|Original\s+Article|'
+        r'^(?:Article|Review(?:\s+Article)?|Research\s+Article|Original\s+Article|'
         r'Letter|Communication|Short\s+Communication)\s+',
         '', title_text, flags=re.IGNORECASE,
     )
@@ -654,11 +683,29 @@ def _extract_authors_from_blocks(doc: fitz.Document, meta: PaperMetadata):
                 return
 
         if ',' in block_text and re.search(r'[A-Z][a-z]+\s+[A-Z]', block_text):
-            authors = _parse_author_text(block_text)
+            # 截断到机构行之前（作者名与机构可能在同一块）
+            author_lines = []
+            for line in block.get("lines", []):
+                line_text = "".join(_clean_pdf_text(s.get("text", "")) for s in line.get("spans", []))
+                if re.match(r'(?:Department|Institute|University|School|Center|College|Lab|Faculty|Correspondence)', line_text.strip()):
+                    break
+                author_lines.append(line_text)
+            author_block_text = " ".join(author_lines) if author_lines else block_text
+            authors = _parse_author_text(author_block_text)
             if len(authors) >= 2:
                 meta.authors_en = authors
                 meta.first_author_en = authors[0]
                 return
+
+        # 单作者：无逗号/点，格式 "FirstName [MiddleName] LastName [*]"
+        stripped_name = re.sub(r'[\s*]+$', '', block_text).strip()
+        words = stripped_name.split()
+        if (2 <= len(words) <= 4
+                and all(re.match(r'^[A-Z][a-z]+$', w) for w in words)
+                and len(stripped_name) < 60):
+            meta.authors_en = [stripped_name]
+            meta.first_author_en = stripped_name
+            return
 
 
 def _parse_author_text_dot(text: str) -> list[str]:
@@ -684,8 +731,8 @@ def _parse_author_text(text: str) -> list[str]:
     author_line = re.sub(r'[\u00b9\u00b2\u00b3\u2070-\u2079]', '', text)
     author_line = re.sub(r'(?<=[a-zA-Z])\d{1,2}', '', author_line)
     author_line = author_line.replace('\xa0', ' ')
-    # 移除 "and " 前缀
-    author_line = re.sub(r'\band\s+', '', author_line)
+    # 将 " and " 转为逗号分隔（避免 "A and B" 被合并成一个token）
+    author_line = re.sub(r',?\s+and\s+', ', ', author_line)
     # 移除省略号
     author_line = author_line.replace('...', ',').replace('…', ',')
     parts = re.split(r',\s*', author_line)
@@ -819,6 +866,27 @@ def _extract_institution_from_blocks(doc: fitz.Document, meta: PaperMetadata):
             meta.institution_en = institution
             meta.country = _infer_country_from_institution(institution)
             return
+
+    # ── 策略3：无编号前缀，扫描 y<350 的小型块，关键词可在任意位置 ──
+    INST_RE = re.compile(
+        r'(?:Department|Institute|University|School|Center|College|Laboratory|Faculty)',
+        re.IGNORECASE,
+    )
+    page0 = doc[0]
+    for b in page0.get_text('blocks'):
+        if b[-1] != 0 or b[1] > 350:
+            continue
+        text = b[4].strip()
+        if len(text) > 300 or not INST_RE.search(text):
+            continue
+        # 遍历行，找第一行含机构关键词的行（块内可能是作者名+机构混合）
+        for line in (l.strip() for l in text.split('\n') if l.strip()):
+            if INST_RE.search(line):
+                institution = re.sub(r'\s*[\w.-]+@[\w.-]+\s*$', '', line).strip()
+                if institution and len(institution) > 10:
+                    meta.institution_en = institution
+                    meta.country = _infer_country_from_institution(institution)
+                    return
 
 
 def _infer_country_from_institution(institution: str) -> str:

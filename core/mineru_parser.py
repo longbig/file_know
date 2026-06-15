@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from core.pdf_parser import ParseResult, PaperMetadata, TextBlock
+from core.pdf_parser import ParseResult, PaperMetadata, TextBlock, parse_pdf as _pymupdf_parse
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,14 @@ def parse_pdf(pdf_path: str, output_dir: str | None = None) -> ParseResult:
             candidate = os.path.join(os.path.dirname(sys.executable), "magic-pdf")
             if os.path.isfile(candidate):
                 magic_pdf_bin = candidate
+        # 搜索项目本地 venv（app 可能用系统 Python 启动，但 magic-pdf 装在 venv 里）
+        if not magic_pdf_bin:
+            project_root = Path(__file__).parent.parent
+            for venv_dir in ("venv312", "venv", ".venv"):
+                candidate = project_root / venv_dir / "bin" / "magic-pdf"
+                if candidate.is_file():
+                    magic_pdf_bin = str(candidate)
+                    break
         if not magic_pdf_bin:
             raise RuntimeError(
                 "magic-pdf 未安装，请运行: pip install 'magic-pdf[full]' && magic-pdf --download-models"
@@ -90,7 +98,12 @@ def parse_pdf(pdf_path: str, output_dir: str | None = None) -> ParseResult:
             shutil.copy2(md_file, dest)
             logger.info(f"Markdown 已保存: {dest}")
 
-        metadata = _extract_metadata(md_text)
+        # 元数据用 PyMuPDF 提取（更准确），MinerU 只提供全文 Markdown
+        try:
+            metadata = _pymupdf_parse(pdf_path).metadata
+        except Exception as e:
+            logger.warning(f"PyMuPDF 元数据提取失败，降级到正则: {e}")
+            metadata = _extract_metadata(md_text)
 
         return ParseResult(
             full_text=md_text,
