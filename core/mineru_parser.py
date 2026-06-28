@@ -45,10 +45,19 @@ def parse_pdf(pdf_path: str, output_dir: str | None = None) -> ParseResult:
         # 搜索项目本地 venv（app 可能用系统 Python 启动，但 magic-pdf 装在 venv 里）
         if not magic_pdf_bin:
             project_root = Path(__file__).parent.parent
+            # Windows venv 用 Scripts/，Linux/macOS 用 bin/
+            bin_dirs = ("Scripts", "bin") if os.name == "nt" else ("bin",)
+            exe_names = ("magic-pdf.exe", "magic-pdf") if os.name == "nt" else ("magic-pdf",)
             for venv_dir in ("venv312", "venv", ".venv"):
-                candidate = project_root / venv_dir / "bin" / "magic-pdf"
-                if candidate.is_file():
-                    magic_pdf_bin = str(candidate)
+                for bin_dir in bin_dirs:
+                    for exe_name in exe_names:
+                        candidate = project_root / venv_dir / bin_dir / exe_name
+                        if candidate.is_file():
+                            magic_pdf_bin = str(candidate)
+                            break
+                    if magic_pdf_bin:
+                        break
+                if magic_pdf_bin:
                     break
         if not magic_pdf_bin:
             raise RuntimeError(
@@ -67,7 +76,7 @@ def parse_pdf(pdf_path: str, output_dir: str | None = None) -> ParseResult:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=1200,
                 env=env,
             )
             if result.returncode != 0:
@@ -75,6 +84,9 @@ def parse_pdf(pdf_path: str, output_dir: str | None = None) -> ParseResult:
                 raise RuntimeError(f"magic-pdf 失败: {result.stderr[:200]}")
             if result.stderr:
                 logger.debug(f"MinerU stderr: {result.stderr[:300]}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"MinerU 超时(1200s)，降级使用 PyMuPDF 解析: {pdf_path}")
+            return _pymupdf_parse(pdf_path)
         except FileNotFoundError:
             raise RuntimeError(
                 "magic-pdf 未安装，请运行: pip install 'magic-pdf[full]' && magic-pdf --download-models"

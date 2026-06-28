@@ -2,8 +2,8 @@
   "providers": [
     {
       "name": "timesniper",
-      "base_url": "https://timesniper.club",
-      "api_key": "sk-I8D47FrTRhSOknjY1fJLVvSoGtEemyqY49hIVZBUwjWd8uJ6",
+      "base_url": "https://yunwu.ai",
+      "api_key": "sk-ONt3RX3NcijNr2lYZbGtTobCXyU4q3G2UlSwBD2N9GdQbyx7",
       "models": [
         "claude-sonnet-4-6",
         "claude-opus-4-6",

@@ -47,6 +47,12 @@ def extract_references_section(full_text: str) -> str:
                 last_pos = match.start()
 
     if last_pos == -1:
+        # 兜底：MinerU Markdown 无标题，直接以 "1. Surname," 格式开始
+        m = re.search(r'(?m)^1\.\s+[A-Z][a-z]+,', full_text)
+        if m and re.search(r'(?m)^2\.\s+[A-Z][a-z]+,', full_text[m.start():]):
+            last_pos = m.start()
+
+    if last_pos == -1:
         return ""
 
     return full_text[last_pos:]
@@ -342,6 +348,14 @@ def parse_references(full_text: str) -> list[Reference]:
         if len(entries_dot) >= 3:
             entries = entries_dot
 
+    use_apa_ref = False
+    if len(entries) < 3:
+        # 格式3: MinerU Markdown，数字+点+空格（无tab），如 "1. Author..."
+        entries_md = re.split(r'(?m)^(\d+)\.\s+(?=[A-Z])', ref_section)
+        if len(entries_md) >= 3:
+            entries = entries_md
+            use_apa_ref = True  # Cell Press 格式，用 _parse_apa_ref 解析
+
     references = []
     # entries[0] 是 "参考文献" 标题前面的内容，跳过
     i = 1
@@ -356,6 +370,8 @@ def parse_references(full_text: str) -> list[Reference]:
 
         if has_chinese:
             ref = _parse_chinese_ref(text)
+        elif use_apa_ref:
+            ref = _parse_apa_ref(text, idx)
         else:
             ref = _parse_english_ref(text)
 

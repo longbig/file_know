@@ -327,6 +327,9 @@ def _extract_english_authors(text: str, bracket_map: list[tuple[int, int]]) -> l
             continue
         if len(author_name) < 2 or len(author_name) > 25:
             continue
+        # 全大写且3字符以上 → 几乎肯定是缩写（OLG、EET、CRISPR）而非作者姓氏
+        if author_name.isupper() and len(author_name) >= 3:
+            continue
         pos = m.start()
         if pos in used_positions:
             continue
@@ -366,6 +369,10 @@ def _extract_english_authors(text: str, bracket_map: list[tuple[int, int]]) -> l
 
         # 排除过短或过长的名字
         if len(author_name) < 2 or len(author_name) > 25:
+            continue
+
+        # 全大写且3字符以上 → 缩写而非作者姓氏
+        if author_name.isupper() and len(author_name) >= 3:
             continue
 
         pos = m.start()

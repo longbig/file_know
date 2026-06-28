@@ -79,23 +79,20 @@ def check_bracket_only(
     # 检查是否所有作者都在括号内
     all_authors_in_bracket = all(a.in_bracket for a in author_mentions)
 
-    # 检查是否所有年份都在括号内（排除 is_ref_number 类型）
-    real_years = [y for y in year_mentions if not getattr(y, 'is_ref_number', False)]
-    if not real_years:
-        # 只有文献编号说明类年份，不适用此规则
-        return pass_result()
-    all_years_in_bracket = all(y.in_bracket for y in real_years)
-
-    if all_authors_in_bracket and all_years_in_bracket:
+    # 核心规则：作者全部在括号内 → 作者未进入正文主干，不符合评论句格式
+    # 无论年份是否在括号外（如 "the first X was found in 1976 (Barrell et al., 1976)"）
+    if all_authors_in_bracket:
         return VetoResult(
             vetoed=True,
             rule_id=1,
-            reason="作者+年份仅在括号内出现，括号外无作者/年份要素",
+            reason="作者仅在括号内出现，未进入正文主干作为评价主体",
         )
 
     # 补充：Author (Year) 格式 — 作者在括号外但年份全部在括号内
     # 合法：Smith (2010) first proposed...  → 作者是主语（句首或主句动作发出者）
     # 非法：as revealed by Liem (1988) / given a task by Lehner et al. (2011) → 作者在介词宾语位置
+    real_years = [y for y in year_mentions if not getattr(y, 'is_ref_number', False)]
+    all_years_in_bracket = real_years and all(y.in_bracket for y in real_years)
     if all_years_in_bracket:
         outside_authors = [a for a in author_mentions if not a.in_bracket]
         if outside_authors:
